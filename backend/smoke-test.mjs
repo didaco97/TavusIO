@@ -131,6 +131,7 @@ try {
 }
 
 // ── T7: start-cvi — doctor ────────────────────────────────────────────────────
+await new Promise(r => setTimeout(r, 1000));
 console.log(`\n${YELLOW}[T7]${RESET} POST /api/explainer/start-cvi (doctor)`);
 try {
   const { ok, status, json } = await postForm('/api/explainer/start-cvi', {

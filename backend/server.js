@@ -10,17 +10,51 @@
  *
  * 2. INTERACTIVE Q&A  (/api/explainer/start-cvi)
  *    → Creates a Tavus Persona + Conversation (CVI) so the user can talk to the avatar.
+ *    → Supports Tavus Knowledge Base: uploaded PDFs are ingested via POST /v2/documents
+ *      and attached to conversations via document_ids for RAG-powered Q&A.
  */
 
 import express from 'express';
 import multer from 'multer';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+import { randomUUID } from 'crypto';
+
+const require = createRequire(import.meta.url);
+// pdf-parse@2.4.x exports a PDFParse class: new PDFParse({ data: buffer }).getText()
+const { PDFParse } = require('pdf-parse');
 
 // Local .env settings must win over a stale inherited dev-shell variable.
 dotenv.config({ override: true });
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
 const app  = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+// ─── Temporary file storage for Tavus document ingestion ─────────────────────
+// Tavus POST /v2/documents requires a publicly-accessible URL.
+// We save uploaded files locally and serve them via GET /api/uploads/:fileId
+// so Tavus can fetch them. Files auto-expire after 10 minutes.
+const TMP_DIR = path.join(__dirname, 'tmp_uploads');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+const tmpFileRegistry = new Map(); // fileId → { filePath, originalName, mimeType, createdAt }
+
+// Auto-cleanup expired temp files every 60 seconds
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of tmpFileRegistry) {
+    if (now - entry.createdAt > 10 * 60 * 1000) {
+      try { fs.unlinkSync(entry.filePath); } catch {}
+      tmpFileRegistry.delete(id);
+    }
+  }
+}, 60_000);
 
 app.use(express.json());
 
@@ -61,13 +95,24 @@ app.get('/api/logs', (req, res) => {
   req.on('close', () => logClients.delete(res));
 });
 
+// ─── Serve temporary uploaded files ──────────────────────────────────────────
+app.get('/api/uploads/:fileId', (req, res) => {
+  const entry = tmpFileRegistry.get(req.params.fileId);
+  if (!entry || !fs.existsSync(entry.filePath)) {
+    return res.status(404).json({ error: 'File not found or expired' });
+  }
+  res.setHeader('Content-Type', entry.mimeType || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `inline; filename="${entry.originalName}"`);
+  fs.createReadStream(entry.filePath).pipe(res);
+});
+
 console.log(`[SERVER] TAVUS_API_KEY : ${TAVUS_API_KEY ? 'OK (' + TAVUS_API_KEY.slice(0,8) + '...)' : 'MISSING'}`);
 console.log(`[SERVER] TAVUS_REPLICA : ${TAVUS_REPLICA_ID || 'MISSING'}`);
 console.log(`[SERVER] TEST_MODE     : ${TAVUS_TEST_MODE}`);
 
 // ─── Tavus helper ─────────────────────────────────────────────────────────────
-async function tavus(method, path, body = null) {
-  const url = `${TAVUS_BASE_URL}${path}`;
+async function tavus(method, apiPath, body = null) {
+  const url = `${TAVUS_BASE_URL}${apiPath}`;
   const opts = {
     method,
     headers: { 'x-api-key': TAVUS_API_KEY, 'Content-Type': 'application/json' },
@@ -154,6 +199,119 @@ Your doctor may also consider a gentle medication to stabilise your heart rate. 
   }
 }
 
+// ─── Tavus Knowledge Base: Upload Document ───────────────────────────────────
+app.post('/api/explainer/upload-document', upload.single('report_file'), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'No file uploaded.' });
+
+  // Validate file type
+  const ext = path.extname(file.originalname).toLowerCase();
+  const allowedExts = ['.pdf', '.txt', '.docx', '.doc', '.png', '.jpg', '.csv', '.xlsx', '.pptx'];
+  if (!allowedExts.includes(ext)) {
+    return res.status(400).json({ error: `Unsupported file type: ${ext}. Supported: ${allowedExts.join(', ')}` });
+  }
+
+  // Save to tmp_uploads with a unique ID
+  const fileId = randomUUID();
+  const fileName = `${fileId}${ext}`;
+  const filePath = path.join(TMP_DIR, fileName);
+  fs.writeFileSync(filePath, file.buffer);
+
+  const mimeTypes = {
+    '.pdf': 'application/pdf', '.txt': 'text/plain', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.doc': 'application/msword', '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.csv': 'text/csv', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+
+  tmpFileRegistry.set(fileId, {
+    filePath,
+    originalName: file.originalname,
+    mimeType: mimeTypes[ext] || 'application/octet-stream',
+    createdAt: Date.now(),
+  });
+
+  // Construct the public URL for Tavus to fetch
+  // In production, replace with your actual public domain
+  const serverHost = process.env.PUBLIC_SERVER_URL || `http://localhost:${process.env.API_PORT || 3001}`;
+  const documentUrl = `${serverHost}/api/uploads/${fileId}`;
+
+  // Extract text immediately for frontend preview
+  let extractedText = '';
+  try {
+    if (ext === '.pdf') {
+      const parser = new PDFParse({ data: file.buffer });
+      const pdfData = await parser.getText();
+      extractedText = pdfData.text || '';
+    } else if (ext === '.txt' || ext === '.md' || ext === '.csv') {
+      extractedText = file.buffer.toString('utf-8');
+    }
+  } catch (err) {
+    console.error('[DOC] Text extraction error:', err.message);
+  }
+
+  // If no API key OR if running on localhost (Tavus cloud cannot reach localhost URLs), return mock doc.
+  // The system prompt still receives the extracted text, so AI will function perfectly.
+  if (!TAVUS_API_KEY || documentUrl.includes('localhost')) {
+    return res.json({
+      document_id: `mock_doc_${fileId.slice(0, 8)}`,
+      document_name: file.originalname,
+      extracted_text: extractedText,
+      status: 'ready',
+      is_mock: true,
+    });
+  }
+
+  try {
+    console.log(`[DOC] Uploading document to Tavus: ${file.originalname} → ${documentUrl}`);
+    const data = await tavus('POST', '/documents', {
+      document_url:  documentUrl,
+      document_name: file.originalname,
+      tags:          ['neurocardio', 'report'],
+    });
+
+    console.log(`[DOC] document_id=${data.document_id}  status=${data.status}`);
+    res.json({
+      document_id:   data.document_id,
+      document_name: data.document_name,
+      extracted_text: extractedText,
+      status:        data.status,
+      progress:      data.progress,
+      is_mock:       false,
+    });
+  } catch (err) {
+    console.error('[DOC] Upload error:', err.message);
+    // Clean up temp file on failure
+    try { fs.unlinkSync(filePath); } catch {}
+    tmpFileRegistry.delete(fileId);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ─── Tavus Knowledge Base: Poll Document Status ──────────────────────────────
+app.get('/api/explainer/document-status/:docId', async (req, res) => {
+  const { docId } = req.params;
+
+  if (docId.startsWith('mock_doc_')) {
+    return res.json({ document_id: docId, status: 'ready', progress: 100, is_mock: true });
+  }
+
+  try {
+    const data = await tavus('GET', `/documents/${docId}`);
+    console.log(`[DOC STATUS] id=${docId}  status=${data.status}  progress=${data.progress}`);
+    res.json({
+      document_id: data.document_id,
+      status:      data.status,      // "started" | "processing" | "ready" | "error"
+      progress:    data.progress,     // 0-100 or null
+      error_message: data.error_message || null,
+      is_mock:     false,
+    });
+  } catch (err) {
+    console.error('[DOC STATUS] Error:', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
 // ─── 1. POST /api/explainer/generate-video  (Avatar Explainer — renders MP4) ──
 app.post('/api/explainer/generate-video', upload.single('report_file'), async (req, res) => {
   let audience = (req.body.target_audience || 'patient').trim().toLowerCase();
@@ -161,7 +319,22 @@ app.post('/api/explainer/generate-video', upload.single('report_file'), async (r
 
   let reportText = (req.body.report_text || '').trim();
   if (req.file) {
-    try { reportText = req.file.buffer.toString('utf-8'); } catch {}
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (ext === '.pdf') {
+      // Use pdf-parse to extract text from PDF
+      try {
+        console.log('[VIDEO] Extracting text from PDF:', req.file.originalname);
+        const parser = new PDFParse({ data: req.file.buffer });
+        const pdfData = await parser.getText();
+        reportText = pdfData.text || '';
+        console.log(`[VIDEO] Extracted ${reportText.length} chars from PDF`);
+      } catch (pdfErr) {
+        console.error('[VIDEO] PDF parse error:', pdfErr.message);
+        return res.status(400).json({ error: 'Failed to extract text from PDF: ' + pdfErr.message });
+      }
+    } else {
+      try { reportText = req.file.buffer.toString('utf-8'); } catch {}
+    }
   }
   const sampleKey = (req.body.sample_key || '').trim();
   if (!reportText && SAMPLE_REPORTS[sampleKey]) {
@@ -179,7 +352,7 @@ app.post('/api/explainer/generate-video', upload.single('report_file'), async (r
     return res.json({
       video_id: 'demo',
       status:   'ready',
-      video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+      video_url: 'https://www.w3schools.com/html/mov_bbb.mp4',
       is_mock:  true,
     });
   }
@@ -201,6 +374,15 @@ app.post('/api/explainer/generate-video', upload.single('report_file'), async (r
     });
   } catch (err) {
     console.error('[VIDEO] Error:', err.message);
+    if (err.message.includes('Payment required') || err.message.includes('credit') || err.message.includes('402')) {
+      console.warn('[VIDEO] Tavus API video credit limit reached — falling back to demo video mode');
+      return res.json({
+        video_id: 'demo',
+        status:   'ready',
+        hosted_url: 'https://www.w3schools.com/html/mov_bbb.mp4',
+        is_mock:  true,
+      });
+    }
     res.status(502).json({ error: err.message });
   }
 });
@@ -211,11 +393,15 @@ app.get('/api/explainer/video-status/:videoId', async (req, res) => {
 
   // Mock / demo shortcut
   if (videoId === 'demo') {
+    const demoUrl = 'https://www.w3schools.com/html/mov_bbb.mp4';
     return res.json({
-      video_id:  'demo',
-      status:    'ready',
-      video_url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-      is_mock:   true,
+      video_id:     'demo',
+      status:       'ready',
+      video_url:    demoUrl,
+      hosted_url:   demoUrl,
+      download_url: demoUrl,
+      progress:     100,
+      is_mock:      true,
     });
   }
 
@@ -248,7 +434,22 @@ app.post('/api/explainer/start-cvi', upload.single('report_file'), async (req, r
 
   let reportText = (req.body.report_text || '').trim();
   if (req.file) {
-    try { reportText = req.file.buffer.toString('utf-8'); } catch {}
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (ext === '.pdf') {
+      // Use pdf-parse to extract text from PDF for system prompt / context
+      try {
+        console.log('[CVI] Extracting text from PDF:', req.file.originalname);
+        const parser = new PDFParse({ data: req.file.buffer });
+        const pdfData = await parser.getText();
+        reportText = pdfData.text || '';
+        console.log(`[CVI] Extracted ${reportText.length} chars from PDF`);
+      } catch (pdfErr) {
+        console.error('[CVI] PDF parse error:', pdfErr.message);
+        return res.status(400).json({ error: 'Failed to extract text from PDF: ' + pdfErr.message });
+      }
+    } else {
+      try { reportText = req.file.buffer.toString('utf-8'); } catch {}
+    }
   }
   const sampleKey = (req.body.sample_key || '').trim();
   if (!reportText && SAMPLE_REPORTS[sampleKey]) {
@@ -259,7 +460,7 @@ app.post('/api/explainer/start-cvi', upload.single('report_file'), async (req, r
   }
 
   const isDoctor  = audience === 'doctor';
-  const sessionId = crypto.randomUUID();
+  const sessionId = randomUUID();
 
   const greeting = isDoctor
     ? "Hello Doctor. I have reviewed the patient's neurocardiology evaluation report in detail. Which findings would you like to explore first?"
@@ -291,15 +492,34 @@ app.post('/api/explainer/start-cvi', upload.single('report_file'), async (req, r
     });
     console.log(`[CVI] persona_id=${persona.persona_id}`);
 
+    // Accept optional document_ids from the frontend for Tavus Knowledge Base RAG
+    let documentIds = [];
+    try {
+      const rawDocIds = req.body.document_ids;
+      if (typeof rawDocIds === 'string') documentIds = JSON.parse(rawDocIds);
+      else if (Array.isArray(rawDocIds)) documentIds = rawDocIds;
+    } catch {}
+    // Filter out mock document IDs — they don't exist in Tavus KB
+    documentIds = documentIds.filter(id => !id.startsWith('mock_doc_'));
+
     console.log('[CVI] Creating conversation ...');
-    const convo = await tavus('POST', '/conversations', {
+    const convoBody = {
       persona_id:              persona.persona_id,
       conversation_name:       `NeuroCardio Q&A — ${audience}`,
       conversational_context:  `Report context: ${reportText.slice(0, 500)}`,
       custom_greeting:         greeting,
       test_mode:               TAVUS_TEST_MODE,
       max_participants:        2,
-    });
+    };
+
+    // Attach Tavus Knowledge Base documents if available
+    if (documentIds.length > 0) {
+      convoBody.document_ids = documentIds;
+      convoBody.document_retrieval_strategy = 'quality';
+      console.log(`[CVI] Attaching ${documentIds.length} document(s) to conversation:`, documentIds);
+    }
+
+    const convo = await tavus('POST', '/conversations', convoBody);
     console.log(`[CVI] conversation_id=${convo.conversation_id}  url=${convo.conversation_url}`);
 
     res.status(201).json({
@@ -313,6 +533,17 @@ app.post('/api/explainer/start-cvi', upload.single('report_file'), async (req, r
     });
   } catch (err) {
     console.error('[CVI] Error:', err.message);
+    if (err.message.includes('concurrent conversations') || err.message.includes('limit') || err.message.includes('Payment required')) {
+      console.warn('[CVI] Tavus API limit reached — falling back to preview mode');
+      return res.status(201).json({
+        session_id:       sessionId,
+        target_audience:  audience,
+        conversation_id:  `mock_${sessionId.slice(0, 8)}`,
+        conversation_url: null,
+        greeting,
+        is_mock:          true,
+      });
+    }
     res.status(502).json({ error: err.message });
   }
 });
@@ -334,8 +565,10 @@ app.post('/api/explainer/end-cvi/:id', async (req, res) => {
 const PORT = process.env.API_PORT || 3001;
 app.listen(PORT, () => {
   console.log(`\n[SERVER] Running on http://localhost:${PORT}`);
-  console.log(`  POST /api/explainer/generate-video   — Avatar Explainer (renders MP4)`);
-  console.log(`  GET  /api/explainer/video-status/:id — Poll render status`);
-  console.log(`  POST /api/explainer/start-cvi        — Interactive Q&A (live CVI)`);
-  console.log(`  POST /api/explainer/end-cvi/:id      — End CVI session\n`);
+  console.log(`  POST /api/explainer/generate-video      — Avatar Explainer (renders MP4)`);
+  console.log(`  GET  /api/explainer/video-status/:id    — Poll render status`);
+  console.log(`  POST /api/explainer/start-cvi           — Interactive Q&A (live CVI)`);
+  console.log(`  POST /api/explainer/end-cvi/:id         — End CVI session`);
+  console.log(`  POST /api/explainer/upload-document     — Upload PDF/doc to Tavus Knowledge Base`);
+  console.log(`  GET  /api/explainer/document-status/:id — Poll document processing status\n`);
 });

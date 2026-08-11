@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, lazy, Suspense } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import DailyIframe from "@daily-co/daily-js";
-import { DailyProvider, DailyVideo, DailyAudio, useParticipantIds, useLocalSessionId } from "@daily-co/daily-react";
+import { DailyProvider, DailyVideo, DailyAudio, useParticipantIds } from "@daily-co/daily-react";
 import {
   Upload,
   Play,
@@ -15,6 +15,12 @@ import {
   ChevronDown,
   Mic,
   MicOff,
+  Brain,
+  Clock,
+  MoreVertical,
+  Activity,
+  FileText,
+  AlertCircle
 } from "lucide-react";
 
 const PRESETS = {
@@ -47,21 +53,13 @@ IMPRESSION: Neurocardiogenic (Vasovagal) Syncope - Mixed Cardioinhibitory & Vaso
   },
 };
 
-// ─── Live Log Terminal (subscribes to /api/logs SSE) ─────────────────────────
+// ─── Live Log Terminal ─────────────────────────────────────────────────────────
 let dailyCleanupChain = Promise.resolve();
 
 async function destroyDailyInstance(callObject) {
   if (!callObject || callObject.isDestroyed?.()) return;
-
-  try {
-    await callObject.leave();
-  } catch {}
-
-  try {
-    await callObject.destroy();
-  } catch (err) {
-    console.warn("[CVI] Daily cleanup warning:", err);
-  }
+  try { await callObject.leave(); } catch {}
+  try { await callObject.destroy(); } catch (err) { console.warn("[CVI] Daily cleanup warning:", err); }
 }
 
 function queueDailyCleanup(callObject) {
@@ -71,7 +69,6 @@ function queueDailyCleanup(callObject) {
 
 async function destroyExistingDailyInstance() {
   await dailyCleanupChain;
-
   try {
     const existing = DailyIframe.getCallInstance?.();
     if (existing && !existing.isDestroyed?.()) {
@@ -113,34 +110,94 @@ function LogTerminal({ onClose }) {
     l === "error" ? "text-red-400" : l === "warn" ? "text-amber-400" : "text-emerald-300";
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#0d1117] border-t border-white/10 shadow-2xl font-mono">
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#0a151d] border-t border-white/10 shadow-2xl font-mono">
       <div
-        className="flex items-center justify-between px-4 py-2.5 cursor-pointer select-none border-b border-white/5"
+        className="flex items-center justify-between px-3 py-2 cursor-pointer select-none border-b border-white/5"
         onClick={() => setOpen((o) => !o)}
       >
-        <div className="flex items-center gap-3">
-          <Terminal className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs font-semibold text-white/60">Backend Terminal</span>
-          <span className="text-xs text-white/20">localhost:3001</span>
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="flex items-center gap-2">
+          <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+          <span className="text-xs font-medium text-white/70">Backend Terminal</span>
+          <span className="text-[11px] text-white/30">localhost:3001</span>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={(e) => { e.stopPropagation(); setLogs([]); }} className="text-white/25 hover:text-white/60 text-xs transition-colors">clear</button>
-          <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="text-white/25 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
-          <ChevronDown className={`w-4 h-4 text-white/25 transition-transform duration-200 ${open ? "" : "rotate-180"}`} />
+          <button onClick={(e) => { e.stopPropagation(); setLogs([]); }} className="text-white/40 hover:text-white text-xs">clear</button>
+          <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="text-white/40 hover:text-red-400"><X className="w-3.5 h-3.5" /></button>
+          <ChevronDown className={`w-3.5 h-3.5 text-white/40 transition-transform duration-200 ${open ? "" : "rotate-180"}`} />
         </div>
       </div>
       {open && (
-        <div className="h-48 overflow-y-auto px-4 py-3 text-xs space-y-0.5 bg-[#0d1117]">
-          {logs.length === 0 && <p className="text-white/20">Waiting for server events...</p>}
+        <div className="h-44 overflow-y-auto px-3 py-2 text-[11px] space-y-0.5 bg-[#081118]">
+          {logs.length === 0 && <p className="text-white/30">Waiting for server events...</p>}
           {logs.map((log, i) => (
-            <div key={i} className="flex gap-3 leading-relaxed">
-              <span className="text-white/20 shrink-0 tabular-nums">{new Date(log.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
+            <div key={i} className="flex gap-2 leading-relaxed">
+              <span className="text-white/30 shrink-0 tabular-nums">{new Date(log.ts).toLocaleTimeString("en-US", { hour12: false })}</span>
               <span className={`break-all ${colorFor(log.level)}`}>{log.msg}</span>
             </div>
           ))}
           <div ref={bottomRef} />
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Minimalist Square Dashboard Shell ──────────────────────────────────────────
+function DashboardShell({ children, showTerm, setShowTerm, onEnd, callState, micMuted, setMicMuted, micLabel, isMock }) {
+  return (
+    <div className={`min-h-screen bg-[#0b1a23] text-white flex flex-col font-sans ${showTerm ? "pb-48" : ""}`}>
+      {/* Header */}
+      <header className="flex items-center justify-between px-5 py-2.5 bg-[#0e212d] border-b border-white/10 shadow-sm relative z-20">
+        <div className="flex items-center gap-2">
+          <Brain className="w-5 h-5 text-[#4fc3f7]" />
+          <span className="text-lg font-bold tracking-tight text-white">22Neuro</span>
+        </div>
+        
+        <div className="flex items-center gap-2 absolute left-1/2 -translate-x-1/2">
+           <span className="text-[13px] text-[#7ca0b5]">Consultation Status:</span>
+           <span className={`text-[13px] font-semibold ${callState === "joined" ? "text-[#34d399]" : callState === "error" ? "text-red-400" : "text-amber-400"}`}>
+             {callState === "joined" ? "Active" : callState === "error" ? "Error" : "Connecting..."}
+           </span>
+        </div>
+        
+        <div className="flex items-center gap-6">
+          <button onClick={onEnd} className="text-xs text-red-400 hover:text-white hover:bg-red-500/20 border border-red-500/30 px-2.5 py-1 rounded-sm transition-colors">Exit</button>
+        </div>
+      </header>
+
+      {/* Main Content Layout */}
+      <main className="flex-1 p-3 flex flex-col items-center justify-center max-h-[calc(100vh-50px)] overflow-hidden">
+        <section className="w-full max-w-4xl flex flex-col gap-2.5 h-full min-h-0">
+          <div className="flex-1 relative rounded-sm overflow-hidden bg-black border border-white/10 shadow-lg flex items-center justify-center">
+            {children}
+          </div>
+
+          {/* Functional Mic Control for CVI */}
+          {setMicMuted && (
+            <div className="bg-[#142b37] rounded-sm p-3 border border-white/10 shadow-sm flex items-center justify-center gap-4">
+              <span className="text-xs text-[#7ca0b5] font-semibold uppercase tracking-wider">
+                {callState === 'joined' ? "Live Audio Active" : "Microphone"}
+              </span>
+              <button 
+                onClick={() => setMicMuted(!micMuted)}
+                title={micLabel}
+                className={`w-10 h-10 rounded-sm flex items-center justify-center transition-colors border ${
+                  micMuted ? 'bg-red-500/20 border-red-500/40 text-red-400' : 
+                  'bg-[#0288d1] border-[#0288d1] hover:bg-[#0277bd] text-white'
+                }`}
+              >
+                {micMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              </button>
+            </div>
+          )}
+        </section>
+      </main>
+
+      {!showTerm && (
+        <button onClick={() => setShowTerm(true)} className="fixed bottom-2 right-2 bg-[#0e212d] text-[#7ca0b5] text-[10px] font-mono px-2.5 py-1 rounded-sm border border-white/10 hover:text-white transition-colors z-50 flex items-center gap-1">
+          <Terminal className="w-3 h-3" /> Logs
+        </button>
       )}
     </div>
   );
@@ -152,11 +209,12 @@ function AvatarExplainerPlayer({ videoData, onBack }) {
   const [status,      setStatus]      = useState(videoData.status || "generating");
   const [downloadUrl, setDownloadUrl] = useState(videoData.download_url || null);
   const [hostedUrl,   setHostedUrl]   = useState(videoData.hosted_url || videoData.video_url || null);
-  const [progress,    setProgress]    = useState(videoData.progress || null);
+  const [progress,    setProgress]    = useState(videoData.progress ?? null);
   const [dots,        setDots]        = useState(".");
-  const [showTerm,    setShowTerm]    = useState(true);
+  const [showTerm,    setShowTerm]    = useState(!isMock); // Auto-open logs for real renders
   const pollRef = useRef(null);
 
+  // Animated dots for loading text
   useEffect(() => {
     if (status !== "ready" && status !== "failed") {
       const t = setInterval(() => setDots((d) => (d.length >= 3 ? "." : d + ".")), 600);
@@ -164,20 +222,20 @@ function AvatarExplainerPlayer({ videoData, onBack }) {
     }
   }, [status]);
 
+  // Poll video status for real (non-mock) videos
   useEffect(() => {
     if (status === "ready" || status === "failed" || isMock) return;
     pollRef.current = setInterval(async () => {
       try {
         const r = await fetch(`/api/explainer/video-status/${videoData.video_id}`);
         const d = await r.json();
-        if (d.progress) setProgress(d.progress);
+        if (d.progress != null) setProgress(d.progress);
+        if (d.status) setStatus(d.status);
         if (d.status === "ready") {
           setDownloadUrl(d.download_url || null);
           setHostedUrl(d.hosted_url || d.video_url || null);
-          setStatus("ready");
           clearInterval(pollRef.current);
         } else if (d.status === "failed") {
-          setStatus("failed");
           clearInterval(pollRef.current);
         }
       } catch {}
@@ -185,84 +243,83 @@ function AvatarExplainerPlayer({ videoData, onBack }) {
     return () => clearInterval(pollRef.current);
   }, [videoData.video_id, status, isMock]);
 
+  // Calculate progress percentage — handles both number and "50/100" string formats
   const pct = (() => {
-    if (!progress) return 5;
-    const [n] = progress.split("/");
-    return Math.max(5, Math.min(99, parseInt(n, 10) || 5));
+    if (progress == null) return 5;
+    if (typeof progress === "number") return Math.max(5, Math.min(100, progress));
+    if (typeof progress === "string") {
+      const [n] = progress.split("/");
+      return Math.max(5, Math.min(100, parseInt(n, 10) || 5));
+    }
+    return 5;
   })();
 
-  return (
-    <div className={`min-h-screen bg-[#0a0a0a] text-white flex flex-col ${showTerm ? "pb-60" : ""}`}>
-      <div className="flex items-center justify-between px-8 py-5 border-b border-white/5">
-        <button onClick={onBack} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors text-sm">
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
-        <div className="flex items-center gap-3">
-          {!showTerm && (
-            <button onClick={() => setShowTerm(true)} className="flex items-center gap-2 text-white/30 hover:text-white/60 text-xs font-mono border border-white/10 px-3 py-1.5 rounded-full transition-colors">
-              <Terminal className="w-3.5 h-3.5" /> Logs
-            </button>
-          )}
-          <div className="flex items-center gap-2 text-white/25 text-xs font-mono">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Dr. Ava Vance — AI NeuroCardiologist
-          </div>
-        </div>
-      </div>
-      <div className="flex-1 flex items-center justify-center px-4 py-12">
-        {status !== "ready" ? (
-          <div className="text-center space-y-10 max-w-sm w-full">
-            <div className="relative mx-auto w-28 h-28">
-              <div className="absolute inset-0 rounded-full border border-white/8 animate-ping" />
-              <div className="absolute inset-2 rounded-full border border-white/5 animate-ping" style={{ animationDelay: "0.4s" }} />
-              <div className="absolute inset-4 rounded-full bg-white/4 flex items-center justify-center">
-                <User className="w-9 h-9 text-white/20" />
-              </div>
-            </div>
-            {status === "failed" ? (
-              <div className="space-y-4">
-                <h2 className="text-xl font-semibold text-red-400">Render Failed</h2>
-                <p className="text-white/40 text-sm leading-relaxed">Tavus could not complete the render. Check the terminal below.</p>
-                <button onClick={onBack} className="px-6 py-3 rounded-full bg-white text-black text-sm font-semibold">Try Again</button>
-              </div>
+  // Determine the best playable video URL
+  const playableUrl = downloadUrl || hostedUrl;
+  const isMp4 = playableUrl && (playableUrl.endsWith('.mp4') || playableUrl.includes('.mp4'));
+
+  // Render the video/loading content
+  const videoContent = (
+    <div className="w-full h-full relative">
+      {status !== "ready" ? (
+         /* ── LOADING / GENERATING STATE ── */
+         <div className="flex flex-col items-center justify-center h-full text-white p-8">
+           <div className="relative mx-auto w-20 h-20 mb-4">
+             <div className="absolute inset-0 rounded-full border border-sky-400/30 animate-ping" />
+             <div className="absolute inset-3 rounded-full bg-sky-400/10 flex items-center justify-center">
+               <Loader className="w-6 h-6 text-sky-300 animate-spin" />
+             </div>
+           </div>
+           <h2 className="text-base font-medium capitalize">
+             {status === "queued" ? `In queue${dots}` : status === "failed" ? "Generation failed" : `${status}${dots}`}
+           </h2>
+           <p className="text-[#7ca0b5] text-xs mt-1">Dr. Anya is recording your report. Takes 1-4 minutes.</p>
+           {/* Progress bar with percentage */}
+           <div className="w-64 mt-4">
+             <div className="flex justify-between text-[10px] text-[#7ca0b5] mb-1">
+               <span className="capitalize">{status}</span>
+               <span>{pct}%</span>
+             </div>
+             <div className="w-full bg-white/10 rounded-sm h-1.5 overflow-hidden">
+               <div className="h-full bg-sky-400 rounded-sm transition-all duration-1000 ease-out" style={{ width: `${pct}%` }} />
+             </div>
+           </div>
+         </div>
+      ) : (
+        /* ── READY STATE — Play the video ── */
+        <>
+          {playableUrl ? (
+            isMp4 ? (
+              <video src={playableUrl} controls autoPlay playsInline className="w-full h-full object-contain bg-black" />
             ) : (
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <h2 className="text-2xl font-semibold tracking-tight">{status === "queued" ? `In queue${dots}` : `Generating${dots}`}</h2>
-                  <p className="text-white/40 text-sm leading-relaxed">Dr. Ava is recording your report. Takes <strong className="text-white/60">1–4 minutes</strong>.</p>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-mono text-white/25"><span>Tavus render</span><span>{pct}%</span></div>
-                  <div className="w-full bg-white/5 rounded-full h-0.5 overflow-hidden">
-                    <div className="h-full bg-emerald-400 rounded-full transition-all duration-1000" style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-                <p className="text-white/15 text-xs font-mono pt-2">video_id: {videoData.video_id}</p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="w-full max-w-4xl space-y-5">
-            {isMock && (
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl px-5 py-3 text-amber-300 text-sm text-center">
-                Preview mode — sample video.
-              </div>
-            )}
-            <div className="relative aspect-video rounded-3xl overflow-hidden bg-black shadow-2xl">
-              {downloadUrl ? (
-                <video src={downloadUrl} controls autoPlay playsInline className="w-full h-full object-cover" />
-              ) : hostedUrl ? (
-                <iframe src={hostedUrl} className="w-full h-full border-0" allow="autoplay; fullscreen" title="Dr. Ava" />
-              ) : (
-                <div className="flex items-center justify-center h-full text-white/30 text-sm">No playback URL.</div>
-              )}
+              <iframe src={playableUrl} className="w-full h-full border-0" allow="autoplay; fullscreen" title="Dr. Anya" />
+            )
+          ) : (
+            <div className="flex items-center justify-center h-full text-white/30 text-xs">No playback URL available.</div>
+          )}
+          {/* Mock/Preview badge */}
+          {isMock && (
+            <div className="absolute top-3 right-3 bg-amber-500/90 text-black text-[10px] font-bold px-2 py-0.5 rounded-sm uppercase tracking-wider">
+              Preview — Demo Video
             </div>
-            <p className="text-center text-white/25 text-sm">Pause, rewind or replay anytime.</p>
-          </div>
-        )}
-      </div>
-      {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
+          )}
+        </>
+      )}
     </div>
+  );
+
+  return (
+    <>
+      <DashboardShell 
+        showTerm={showTerm} 
+        setShowTerm={setShowTerm} 
+        onEnd={onBack}
+        callState={status === "ready" ? "joined" : "init"}
+      >
+        {videoContent}
+      </DashboardShell>
+      {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
+    </>
   );
 }
 
@@ -276,63 +333,52 @@ function CVIVideoArea({ onRemoteParticipantChange }) {
   }, [remoteIds.length, onRemoteParticipantChange]);
 
   return (
-    <div className="w-full max-w-4xl relative">
-      {/* DailyAudio renders a hidden <audio> for all remote audio tracks */}
+    <div className="w-full h-full relative">
       <DailyAudio />
 
-      <div className="aspect-video rounded-3xl overflow-hidden bg-black shadow-2xl">
-        {avatarId ? (
-          <DailyVideo
-            sessionId={avatarId}
-            type="video"
-            autoPlay
-            mirror={false}
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center h-full gap-3">
-            <div className="w-8 h-8 rounded-full border-2 border-white/15 border-t-white animate-spin" />
-            <p className="text-white/25 text-sm font-mono">Waiting for Dr. Ava's video stream...</p>
+      {avatarId ? (
+        <DailyVideo
+          sessionId={avatarId}
+          type="video"
+          autoPlay
+          mirror={false}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center h-full gap-3 relative">
+          <div className="absolute inset-0 z-0">
+             <img src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=800&q=80" alt="Background Placeholder" className="w-full h-full object-cover opacity-25" />
           </div>
-        )}
-      </div>
-
-      <p className="text-center text-white/20 text-xs mt-4 font-mono">
-        {avatarId ? "Speak into your microphone to ask Dr. Ava about the report" : "Avatar is initializing..."}
-      </p>
+          <div className="w-8 h-8 rounded-full border-2 border-white/20 border-t-white animate-spin z-10" />
+          <p className="text-white/70 text-xs font-medium z-10">Connecting to Dr. Anya's video stream...</p>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── CVI Room (uses DailyProvider + DailyVideo — no iframe, no meeting room) ─
+// ─── CVI Room (uses DailyProvider + DailyVideo) ──────────────────────────────
 function CVIRoom({ sessionData, onClose }) {
   const [callObj,   setCallObj]   = useState(null);
   const [callState, setCallState] = useState("init");
   const [micMuted,  setMicMuted]  = useState(false);
-  const [showTerm,  setShowTerm]  = useState(true);
+  const [showTerm,  setShowTerm]  = useState(false);
   const [errorMsg,  setErrorMsg]  = useState("");
   const [avatarJoined, setAvatarJoined] = useState(false);
-  const [micLevel, setMicLevel] = useState(0);
-  const [micMonitor, setMicMonitor] = useState("checking");
   const callRef = useRef(null);
   const initRunRef = useRef(0);
 
   const isMock  = sessionData?.is_mock;
   const roomUrl = sessionData?.conversation_url;
 
-  // Create call object and join
   useEffect(() => {
     if (isMock || !roomUrl) return;
     let active = true;
     const runId = ++initRunRef.current;
     const isActiveRun = () => active && runId === initRunRef.current;
 
-    const handleJoined = () => {
-      if (isActiveRun()) setCallState("joined");
-    };
-    const handleLeft = () => {
-      if (isActiveRun()) setCallState("left");
-    };
+    const handleJoined = () => { if (isActiveRun()) setCallState("joined"); };
+    const handleLeft = () => { if (isActiveRun()) setCallState("left"); };
     const handleError = (e) => {
       console.error("[CVI] error:", e?.errorMsg || e);
       if (isActiveRun()) {
@@ -351,9 +397,7 @@ function CVIRoom({ sessionData, onClose }) {
         await destroyExistingDailyInstance();
         if (!isActiveRun()) return;
 
-        const co = DailyIframe.createCallObject({
-          subscribeToTracksAutomatically: true,
-        });
+        const co = DailyIframe.createCallObject({ subscribeToTracksAutomatically: true });
         callRef.current = co;
 
         co.on("joined-meeting", handleJoined);
@@ -385,7 +429,6 @@ function CVIRoom({ sessionData, onClose }) {
     return () => {
       active = false;
       initRunRef.current += 1;
-
       const co = callRef.current;
       callRef.current = null;
       if (co) {
@@ -399,52 +442,16 @@ function CVIRoom({ sessionData, onClose }) {
 
   useEffect(() => {
     if (callState !== "joined" || avatarJoined) return;
-
     const timeout = setTimeout(() => {
-      setErrorMsg("Dr. Ava did not join this room. Please start a new session.");
+      setErrorMsg("Dr. Anya did not join this room. Please start a new session.");
       setCallState("error");
     }, 45000);
-
     return () => clearTimeout(timeout);
   }, [callState, avatarJoined]);
 
-  // Mic toggle
   useEffect(() => {
     if (callObj && callState === "joined") callObj.setLocalAudio(!micMuted);
   }, [micMuted, callState, callObj]);
-
-  useEffect(() => {
-    if (!callObj || callState !== "joined") {
-      setMicLevel(0);
-      setMicMonitor("checking");
-      return;
-    }
-
-    let active = true;
-    let receivedAudioLevel = false;
-    const handleAudioLevel = ({ audioLevel = 0 }) => {
-      if (!active) return;
-      receivedAudioLevel = true;
-      setMicLevel(Math.max(0, Math.min(1, audioLevel)));
-      setMicMonitor("ready");
-    };
-
-    callObj.on("local-audio-level", handleAudioLevel);
-    callObj.startLocalAudioLevelObserver(120).catch(() => {
-      if (active) setMicMonitor("unavailable");
-    });
-
-    const inputTimeout = setTimeout(() => {
-      if (active && !receivedAudioLevel) setMicMonitor("unavailable");
-    }, 3000);
-
-    return () => {
-      active = false;
-      clearTimeout(inputTimeout);
-      callObj.off("local-audio-level", handleAudioLevel);
-      try { callObj.stopLocalAudioLevelObserver(); } catch {}
-    };
-  }, [callObj, callState]);
 
   const handleEnd = async () => {
     const co = callRef.current || callObj;
@@ -460,126 +467,72 @@ function CVIRoom({ sessionData, onClose }) {
     onClose();
   };
 
-  const micHasSignal = micLevel > 0.015;
-  const micLabel = micMuted
-    ? "Microphone muted"
-    : micMonitor === "unavailable"
-      ? "Microphone unavailable"
-      : micMonitor === "checking"
-        ? "Checking microphone"
-        : micHasSignal
-          ? "Microphone receiving sound"
-          : "Microphone on: waiting for sound";
-  const micTone = micMuted || micMonitor === "unavailable"
-    ? "text-red-400 border-red-500/30 bg-red-500/10"
-    : micHasSignal
-      ? "text-emerald-300 border-emerald-400/30 bg-emerald-400/10"
-      : "text-amber-300 border-amber-400/30 bg-amber-400/10";
-  const micMeter = Math.max(0.18, Math.min(1, micLevel * 5));
+  const micLabel = micMuted ? "Microphone muted" : "Microphone active";
 
-  // ── UI shell (shared between DailyProvider-wrapped and non-wrapped states) ──
-  const shell = (videoContent) => (
-    <div className={`min-h-screen bg-[#0a0a0a] text-white flex flex-col ${showTerm ? "pb-60" : ""}`}>
-      <div className="flex items-center justify-between px-8 py-5 border-b border-white/5">
-        <button onClick={handleEnd} className="flex items-center gap-2 text-white/40 hover:text-white transition-colors text-sm">
-          <ArrowLeft className="w-4 h-4" /> End Session
-        </button>
-        <div className="flex items-center gap-3">
-          {!showTerm && (
-            <button onClick={() => setShowTerm(true)} className="flex items-center gap-2 text-white/30 hover:text-white/60 text-xs font-mono border border-white/10 px-3 py-1.5 rounded-full transition-colors">
-              <Terminal className="w-3.5 h-3.5" /> Logs
-            </button>
-          )}
-          <div className="flex items-center gap-2 text-white/25 text-xs font-mono">
-            <div className={`w-2 h-2 rounded-full ${callState === "joined" ? "bg-emerald-400" : callState === "error" ? "bg-red-400" : "bg-amber-400"} animate-pulse`} />
-            {callState === "joined" && avatarJoined ? "Live — Dr. Ava Vance" : callState === "joined" ? "Starting Dr. Ava..." : callState === "error" ? "Error" : "Connecting..."}
-          </div>
-        </div>
-      </div>
+  const shellProps = {
+    showTerm, setShowTerm, onEnd: handleEnd, callState, micMuted, setMicMuted, micLabel, isMock
+  };
 
-      <div className="flex-1 relative flex flex-col items-center justify-center px-4 py-10">
-        {videoContent}
-      </div>
-
-      {!isMock && callState === "joined" && (
-        <div className="fixed left-1/2 -translate-x-1/2 flex items-center gap-4" style={{ bottom: showTerm ? "240px" : "2rem" }}>
-          <div title={micLabel} aria-label={micLabel} role="status" className={`h-12 w-12 rounded-full border flex items-center justify-center ${micTone}`}>
-            {micMuted || micMonitor === "unavailable" ? (
-              <MicOff className="w-5 h-5" />
-            ) : micMonitor === "checking" ? (
-              <Mic className="w-5 h-5 animate-pulse" />
-            ) : (
-              <div className="flex items-end gap-0.5 h-5" aria-hidden="true">
-                {[0.42, 0.7, 1].map((baseHeight) => (
-                  <span
-                    key={baseHeight}
-                    className="w-1 rounded-full bg-current transition-transform duration-100 origin-bottom"
-                    style={{ height: `${baseHeight * 18}px`, transform: `scaleY(${micMeter})` }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-          <button onClick={() => setMicMuted((m) => !m)} title={micMuted ? "Unmute" : "Mute"}
-            className={`w-14 h-14 rounded-full flex items-center justify-center border-2 text-lg transition-all duration-200 ${micMuted ? "bg-red-500/20 border-red-500/40 text-red-400" : "bg-white/10 border-white/15 text-white hover:bg-white/20"}`}>
-            {micMuted ? "🔇" : "🎙️"}
-          </button>
-          <button onClick={handleEnd} title="End session" className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-lg text-lg border-2 border-red-500/50">✕</button>
-        </div>
-      )}
-
-      {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
-    </div>
-  );
-
-  // ── Mock mode ──
   if (isMock) {
-    return shell(
-      <div className="text-center space-y-6 max-w-sm">
-        <div className="w-28 h-28 rounded-full overflow-hidden mx-auto bg-white/5 ring-1 ring-white/10">
-          <img src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=400&q=80" alt="Dr. Ava" className="w-full h-full object-cover" />
-        </div>
-        <h3 className="text-lg font-semibold text-white">Dr. Ava Vance</h3>
-        <p className="text-white/35 text-sm italic">"{sessionData?.greeting || "I am ready for your questions."}"</p>
-        <div className="bg-white/4 border border-white/8 rounded-2xl p-5 text-left text-sm text-white/40">
-          <p>Add <code className="text-white/60">TAVUS_API_KEY</code> and <code className="text-white/60">TAVUS_REPLICA_ID</code> to <code className="text-white/60">.env</code></p>
-        </div>
-      </div>
+    return (
+      <>
+        <DashboardShell {...shellProps}>
+          <img src="https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&w=800&q=80" alt="Dr. Anya Mock" className="w-full h-full object-cover" />
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center flex-col">
+             <div className="bg-[#142b37]/90 border border-white/15 rounded-sm p-5 text-sky-50 max-w-xs text-center shadow-xl">
+               <h3 className="text-base font-semibold mb-1.5">Preview Mode</h3>
+               <p className="text-xs opacity-80 mb-3">Viewing sample layout. Live video requires API keys.</p>
+               <p className="text-[11px] bg-black/40 p-2 rounded-sm font-mono">Add TAVUS_API_KEY to .env</p>
+             </div>
+          </div>
+        </DashboardShell>
+        {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
+      </>
     );
   }
 
-  // ── Error state ──
   if (callState === "error") {
-    return shell(
-      <div className="text-center space-y-6 max-w-sm">
-        <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center mx-auto"><X className="w-8 h-8 text-red-400" /></div>
-        <h3 className="text-lg font-semibold text-red-400">Connection Failed</h3>
-        <p className="text-white/40 text-sm">{errorMsg}</p>
-        <button onClick={handleEnd} className="px-6 py-3 rounded-full bg-white text-black text-sm font-semibold">Go Back</button>
-      </div>
+    return (
+      <>
+        <DashboardShell {...shellProps}>
+           <div className="flex flex-col items-center justify-center h-full text-center">
+             <div className="w-12 h-12 rounded-sm bg-red-500/20 flex items-center justify-center mb-3 border border-red-500/40"><X className="w-6 h-6 text-red-400" /></div>
+             <h3 className="text-base font-semibold text-red-400 mb-1">Connection Failed</h3>
+             <p className="text-xs text-white/60">{errorMsg}</p>
+           </div>
+        </DashboardShell>
+        {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
+      </>
     );
   }
 
-  // ── Connecting state (no call object yet) ──
   if (!callObj || callState === "init" || callState === "joining") {
-    return shell(
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-10 h-10 rounded-full border-2 border-white/15 border-t-white animate-spin" />
-        <p className="text-white/30 text-sm">Connecting to Dr. Ava...</p>
-        <p className="text-white/15 text-xs font-mono">Establishing secure video stream</p>
-      </div>
+    return (
+      <>
+        <DashboardShell {...shellProps}>
+           <div className="flex flex-col items-center justify-center h-full text-center gap-3">
+             <div className="w-10 h-10 rounded-full border-2 border-sky-500/20 border-t-sky-400 animate-spin" />
+             <p className="text-xs text-white/70">Connecting to video stream...</p>
+           </div>
+        </DashboardShell>
+        {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
+      </>
     );
   }
 
-  // ── Joined: wrap in DailyProvider so hooks work inside CVIVideoArea ──
   return (
-    <DailyProvider callObject={callObj}>
-      {shell(<CVIVideoArea onRemoteParticipantChange={setAvatarJoined} />)}
-    </DailyProvider>
+    <>
+      <DailyProvider callObject={callObj}>
+        <DashboardShell {...shellProps}>
+          <CVIVideoArea onRemoteParticipantChange={setAvatarJoined} />
+        </DashboardShell>
+      </DailyProvider>
+      {showTerm && <LogTerminal onClose={() => setShowTerm(false)} />}
+    </>
   );
 }
 
-// ─── Main Upload / Selection Screen ──────────────────────────────────────────
+// ─── Main Upload / Selection Screen (Minimalist Square Design) ────────────────
 export default function NeuroCardioExplainer() {
   const [audience,       setAudience]       = useState("patient");
   const [selectedPreset, setSelectedPreset] = useState("pots_dysautonomia");
@@ -593,27 +546,114 @@ export default function NeuroCardioExplainer() {
   const [startingCVI, setStartingCVI] = useState(false);
   const [cviData,     setCviData]     = useState(null);
 
-  const handlePreset = (key) => { setSelectedPreset(key); setReportText(PRESETS[key].text); setUploadedFile(""); };
+  // Tavus Knowledge Base document state
+  const [docUploadStatus, setDocUploadStatus] = useState("idle"); // "idle" | "uploading" | "processing" | "ready" | "error"
+  const [docId,           setDocId]           = useState(null);
+  const [docProgress,     setDocProgress]     = useState(null);
+  const [docError,        setDocError]        = useState("");
+  const docPollRef = useRef(null);
 
-  const handleUpload = (e) => {
+  const handlePreset = (key) => {
+    setSelectedPreset(key);
+    setReportText(PRESETS[key].text);
+    setUploadedFile("");
+    // Clear any previous document upload state
+    setDocUploadStatus("idle");
+    setDocId(null);
+    setDocProgress(null);
+    setDocError("");
+    if (docPollRef.current) { clearInterval(docPollRef.current); docPollRef.current = null; }
+  };
+
+  const handleUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadedFile(file.name);
     setSelectedPreset("");
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
+    setDocError("");
+    setDocId(null);
+    setDocProgress(null);
+    if (docPollRef.current) { clearInterval(docPollRef.current); docPollRef.current = null; }
+
+    const isPdf = file.name.toLowerCase().endsWith(".pdf");
+
+    // For text-based files, also read locally so the textarea shows content
+    if (!isPdf) {
       const reader = new FileReader();
       reader.onload = (ev) => setReportText(ev.target.result || "");
       reader.readAsText(file);
     } else {
-      setReportText("PDF selected — backend will extract text on submit.");
+      setReportText("Extracting PDF text...");
+    }
+
+    // Upload to our backend → Tavus Knowledge Base
+    setDocUploadStatus("uploading");
+    try {
+      const fd = new FormData();
+      fd.append("report_file", file);
+      const r = await fetch("/api/explainer/upload-document", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok) {
+        setDocUploadStatus("error");
+        setDocError(d.error || "Upload failed");
+        return;
+      }
+
+      setDocId(d.document_id);
+      if (d.extracted_text) setReportText(d.extracted_text);
+
+      if (d.status === "ready" || d.is_mock) {
+        setDocUploadStatus("ready");
+        setDocProgress(100);
+        return;
+      }
+
+      // Start polling for document processing status
+      setDocUploadStatus("processing");
+      setDocProgress(d.progress || 0);
+
+      docPollRef.current = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/explainer/document-status/${d.document_id}`);
+          const sd = await sr.json();
+          if (sd.progress != null) setDocProgress(sd.progress);
+
+          if (sd.status === "ready") {
+            setDocUploadStatus("ready");
+            setDocProgress(100);
+            clearInterval(docPollRef.current);
+            docPollRef.current = null;
+          } else if (sd.status === "error") {
+            setDocUploadStatus("error");
+            setDocError(sd.error_message || "Document processing failed");
+            clearInterval(docPollRef.current);
+            docPollRef.current = null;
+          }
+        } catch {}
+      }, 3000);
+    } catch (err) {
+      setDocUploadStatus("error");
+      setDocError("Upload failed: " + err.message);
     }
   };
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => { if (docPollRef.current) clearInterval(docPollRef.current); };
+  }, []);
 
   const buildFormData = () => {
     const fd = new FormData();
     fd.append("target_audience", audience);
-    if (selectedPreset) { fd.append("sample_key", selectedPreset); }
-    else { fd.append("report_text", reportText); const fi = document.querySelector('input[type="file"]'); if (fi?.files[0]) fd.append("report_file", fi.files[0]); }
+    if (selectedPreset) {
+      fd.append("sample_key", selectedPreset);
+    } else {
+      fd.append("report_text", reportText);
+      const fi = document.querySelector('input[type="file"]');
+      if (fi?.files[0]) fd.append("report_file", fi.files[0]);
+    }
+    // Attach Tavus document_ids for CVI Knowledge Base RAG
+    if (docId) fd.append("document_ids", JSON.stringify([docId]));
     return fd;
   };
 
@@ -645,80 +685,135 @@ export default function NeuroCardioExplainer() {
   if (cviData)   return <CVIRoom sessionData={cviData} onClose={() => setCviData(null)} />;
 
   return (
-    <div className={`min-h-screen bg-[#fafafa] text-slate-900 font-sans ${showTerm ? "pb-60" : ""}`}>
-      <div className="max-w-2xl mx-auto px-6 py-16 space-y-12">
-        <div className="text-center space-y-3">
-          <div className="inline-flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-100 px-3 py-1.5 rounded-full">
-            <div className="w-2 h-2 rounded-full bg-emerald-500" /> Powered by Tavus AI
-          </div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-black">NeuroCardiology AI</h1>
-          <p className="text-slate-500 text-lg">Upload a report. Watch an AI avatar explain it — or ask it questions live.</p>
+    <div className={`min-h-screen bg-[#0b1a23] text-white font-sans ${showTerm ? "pb-48" : ""}`}>
+      <header className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#0e212d]">
+        <div className="flex items-center gap-2">
+          <Brain className="w-6 h-6 text-[#4fc3f7]" />
+          <span className="text-xl font-bold tracking-tight text-white">22Neuro</span>
+        </div>
+      </header>
+      
+      <div className="max-w-2xl mx-auto px-5 py-8 space-y-6">
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-bold tracking-tight text-white">AI Cardiology Explainer</h1>
+          <p className="text-[#7ca0b5] text-sm">Upload an ECG report to consult with our AI specialist.</p>
         </div>
 
         <div className="flex justify-center">
-          <div className="bg-slate-100 p-1 rounded-full inline-flex gap-1">
+          <div className="bg-[#142b37] p-1 rounded-sm inline-flex gap-1 border border-white/10">
             {[["patient", "For Patients"], ["doctor", "For Doctors"]].map(([val, label]) => (
               <button key={val} onClick={() => setAudience(val)}
-                className={`px-6 py-2.5 rounded-full text-sm font-semibold transition-all ${audience === val ? "bg-white text-black shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                className={`px-6 py-2 rounded-sm text-xs font-semibold transition-all ${audience === val ? "bg-[#0288d1] text-white" : "text-[#7ca0b5] hover:text-white"}`}>
                 {label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 space-y-6">
-          <h2 className="text-lg font-bold text-black">Select or upload a report</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {Object.entries(PRESETS).map(([key, preset]) => (
-              <button key={key} onClick={() => handlePreset(key)}
-                className={`relative p-4 rounded-2xl border text-left transition-all ${selectedPreset === key ? "border-black bg-black text-white" : "border-slate-200 hover:border-slate-300 text-slate-700"}`}>
-                {selectedPreset === key && <Check className="absolute top-3 right-3 w-4 h-4 text-white/60" />}
-                <p className="text-sm font-semibold leading-snug pr-5">{preset.label}</p>
-              </button>
-            ))}
+        <div className="bg-[#0b1a23] rounded-sm border border-white/10 shadow-sm p-6 space-y-4">
+          <h2 className="text-[13px] font-semibold text-white uppercase tracking-widest flex items-center gap-2 pb-2">
+             <Upload className="w-4 h-4 text-[#4fc3f7]" />
+             Select or upload a report
+          </h2>
+          
+          <div className="flex flex-col gap-0 border border-white/10 rounded-sm overflow-hidden bg-[#0a151d]">
+            {/* Tabs Row */}
+            <div className="grid grid-cols-2 bg-[#0e212d]">
+              {Object.entries(PRESETS).map(([key, preset]) => (
+                <button key={key} onClick={() => handlePreset(key)}
+                  className={`relative p-3.5 text-left transition-all border-b border-r border-white/5 last:border-r-0 ${selectedPreset === key ? "border-b-0 border-[#0288d1] bg-[#0a151d] text-white" : "hover:bg-white/5 text-[#86a8bc]"}`}>
+                  {selectedPreset === key && <Check className="absolute top-3.5 right-3 w-4 h-4 text-[#4fc3f7]" />}
+                  <p className="text-[13px] font-medium leading-snug pr-5">{preset.label}</p>
+                </button>
+              ))}
+            </div>
+            
+            {/* Textarea inside the container block */}
+            <textarea value={reportText} onChange={(e) => { setReportText(e.target.value); setSelectedPreset(""); }} rows={6} placeholder="Or paste your neurocardiology report text here..."
+              className="w-full bg-[#0a151d] p-4 text-[13px] leading-relaxed focus:outline-none focus:ring-0 border-none text-white placeholder-[#5a7d90] resize-y transition-colors" />
           </div>
-          <textarea value={reportText} onChange={(e) => { setReportText(e.target.value); setSelectedPreset(""); }} rows={6} placeholder="Or paste your neurocardiology report text here..."
-            className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm focus:outline-none focus:border-black focus:ring-1 focus:ring-black resize-none transition-colors" />
-          <label className="flex items-center gap-2 cursor-pointer text-sm text-blue-600 hover:text-blue-800 transition-colors w-fit">
-            <Upload className="w-4 h-4" />
-            <span>{uploadedFile ? `Loaded: ${uploadedFile}` : "Upload PDF or TXT file"}</span>
-            <input type="file" accept=".pdf,.txt,.md" onChange={handleUpload} className="hidden" />
-          </label>
+
+          {/* Upload button below textarea */}
+          <div className="flex items-center gap-3 pt-2">
+            <label className={`flex items-center gap-2 cursor-pointer text-xs font-medium transition-colors border bg-[#142b37] px-4 py-2 rounded-sm w-fit ${
+              docUploadStatus === "ready" ? "text-emerald-400 border-emerald-500/30 hover:border-emerald-500/50" :
+              docUploadStatus === "error" ? "text-red-400 border-red-500/30" :
+              docUploadStatus === "uploading" || docUploadStatus === "processing" ? "text-amber-400 border-amber-500/30 pointer-events-none" :
+              "text-[#4fc3f7] hover:text-white border-white/10 hover:border-white/30"
+            }`}>
+              {docUploadStatus === "uploading" || docUploadStatus === "processing" ? (
+                <Loader className="w-3.5 h-3.5 animate-spin" />
+              ) : docUploadStatus === "ready" ? (
+                <Check className="w-3.5 h-3.5" />
+              ) : docUploadStatus === "error" ? (
+                <AlertCircle className="w-3.5 h-3.5" />
+              ) : (
+                <Upload className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {docUploadStatus === "uploading" ? "Uploading..." :
+                 docUploadStatus === "processing" ? `Processing${docProgress != null ? ` (${docProgress}%)` : "..."}` :
+                 docUploadStatus === "ready" ? `Ready: ${uploadedFile}` :
+                 docUploadStatus === "error" ? "Upload failed" :
+                 uploadedFile ? `Loaded: ${uploadedFile}` : "Upload PDF or TXT"}
+              </span>
+              <input type="file" accept=".pdf,.txt,.md,.docx,.doc,.csv,.xlsx" onChange={handleUpload} className="hidden" disabled={docUploadStatus === "uploading" || docUploadStatus === "processing"} />
+            </label>
+
+            {/* Document status badge */}
+            {docUploadStatus === "ready" && docId && (
+              <span className="flex items-center gap-1 text-[10px] text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-sm">
+                <FileText className="w-3 h-3" />
+                Knowledge Base linked
+              </span>
+            )}
+            {docUploadStatus === "processing" && (
+              <div className="flex items-center gap-2">
+                <div className="w-24 bg-white/10 rounded-none h-1 overflow-hidden">
+                  <div className="h-full bg-amber-400 rounded-none transition-all duration-700" style={{ width: `${docProgress || 5}%` }} />
+                </div>
+                <span className="text-[10px] text-amber-400/80">Tavus ingesting</span>
+              </div>
+            )}
+            {docUploadStatus === "error" && docError && (
+              <span className="text-[10px] text-red-400/80">{docError}</span>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <button onClick={handleGenerateVideo} disabled={generatingVideo || startingCVI || !reportText.trim()}
-            className="group flex flex-col items-start gap-4 bg-white border border-slate-200 hover:border-slate-300 hover:shadow-sm rounded-3xl p-7 text-left transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-            <div className="w-11 h-11 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-              {generatingVideo ? <Loader className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5 ml-0.5" />}
+            className="flex flex-col items-start gap-3 bg-[#142b37] border border-white/10 hover:border-[#0288d1] rounded-sm p-5 text-left transition-all disabled:opacity-50 shadow-sm">
+            <div className="w-9 h-9 rounded-sm bg-[#0288d1]/20 text-[#4fc3f7] flex items-center justify-center shrink-0 border border-[#0288d1]/30">
+              {generatingVideo ? <Loader className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 ml-0.5" />}
             </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-black">Avatar Explainer</h3>
-              <p className="text-sm text-slate-500 leading-relaxed">An AI avatar records a full video explanation of your report.</p>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Avatar Explainer</h3>
+              <p className="text-xs text-[#7ca0b5] mt-1">Full AI recorded video explanation.</p>
             </div>
-            <div className="flex items-center gap-1 text-sm font-semibold text-blue-600 mt-auto">
-              {generatingVideo ? "Submitting..." : <><span>Generate video</span> <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" /></>}
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-[#4fc3f7] mt-auto uppercase tracking-wider">
+              {generatingVideo ? "Submitting..." : <><span>Generate video</span> <ArrowRight className="w-3.5 h-3.5" /></>}
             </div>
           </button>
 
           <button onClick={handleStartCVI} disabled={startingCVI || generatingVideo || !reportText.trim()}
-            className="group flex flex-col items-start gap-4 bg-black hover:bg-slate-900 rounded-3xl p-7 text-left transition-all disabled:opacity-50 disabled:cursor-not-allowed">
-            <div className="w-11 h-11 rounded-2xl bg-white/10 text-white flex items-center justify-center shrink-0">
-              {startingCVI ? <Loader className="w-5 h-5 animate-spin" /> : <MessageCircle className="w-5 h-5" />}
+            className="flex flex-col items-start gap-3 bg-[#0288d1] hover:bg-[#0277bd] border border-[#0288d1] rounded-sm p-5 text-left transition-all disabled:opacity-50 shadow-sm">
+            <div className="w-9 h-9 rounded-sm bg-white/20 text-white flex items-center justify-center shrink-0 border border-white/30">
+              {startingCVI ? <Loader className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
             </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-white">Interactive Q&A</h3>
-              <p className="text-sm text-white/50 leading-relaxed">Speak live with an AI avatar about the report.</p>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Interactive Q&A</h3>
+              <p className="text-xs text-sky-100 mt-1">Live voice conversation with Dr. Anya.</p>
             </div>
-            <div className="flex items-center gap-1 text-sm font-semibold text-white mt-auto">
-              {startingCVI ? "Connecting..." : <><span>Start live chat</span> <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" /></>}
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-white mt-auto uppercase tracking-wider">
+              {startingCVI ? "Connecting..." : <><span>Start live chat</span> <ArrowRight className="w-3.5 h-3.5" /></>}
             </div>
           </button>
         </div>
 
-        <div className="flex justify-center">
+        <div className="flex justify-center pt-4">
           <button onClick={() => setShowTerm((s) => !s)}
-            className="flex items-center gap-2 text-xs font-mono text-slate-400 hover:text-slate-600 border border-slate-200 hover:border-slate-300 px-4 py-2 rounded-full transition-colors">
+            className="flex items-center gap-1.5 text-xs font-mono text-[#7ca0b5] hover:text-white border border-white/10 bg-[#142b37] px-4 py-2 rounded-sm transition-colors">
             <Terminal className="w-3.5 h-3.5" />
             {showTerm ? "Hide Backend Terminal" : "Show Backend Terminal"}
           </button>

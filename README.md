@@ -1,127 +1,199 @@
 <div align="center">
-  
+
 # 🧠🫀 NeuroCardiology AI Explainer
 
-**Translating complex neurocardiology diagnostic reports into tailored, accessible insights.**
+**Translating complex neurocardiology diagnostic reports into tailored, accessible insights via AI-powered video avatars.**
 
 [![React](https://img.shields.io/badge/React-18.2-blue.svg?style=for-the-badge&logo=react)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.1-purple.svg?style=for-the-badge&logo=vite)](https://vitejs.dev/)
 [![TailwindCSS](https://img.shields.io/badge/Tailwind-3.4-38B2AC.svg?style=for-the-badge&logo=tailwind-css)](https://tailwindcss.com/)
 [![Express](https://img.shields.io/badge/Express-4.18-lightgrey.svg?style=for-the-badge&logo=express)](https://expressjs.com/)
-[![Python](https://img.shields.io/badge/Python-Backend-3776AB.svg?style=for-the-badge&logo=python)](https://python.org/)
+[![Tavus](https://img.shields.io/badge/Tavus-CVI-brightgreen.svg?style=for-the-badge)](https://tavus.io/)
 
 </div>
 
 ---
 
-The **NeuroCardiology AI Explainer** takes complex diagnostic reports (autonomic reflex screens, tilt table tests, POTS, vasovagal syncope, baroreflex sensitivity, HRV, stroke-cardiac correlates) and translates them into tailored explanations designed specifically for either **Doctors/Clinicians** or **Patients/Families**.
+The **NeuroCardiology AI Explainer** takes complex diagnostic reports — autonomic reflex screens, tilt table tests, POTS evaluations, vasovagal syncope, baroreflex sensitivity, HRV analysis, and stroke-cardiac correlates — and translates them into tailored AI video explanations designed specifically for either **Doctors/Clinicians** or **Patients/Families**.
+
+---
 
 ## ✨ Key Features
 
-The platform provides two distinct, powerful explanation modes:
-
-1. 📄 **Static Explainer**: Generates instant, structured clinical syntheses for doctors, or jargon-free plain language guides (complete with visual analogies) for patients.
-2. 🎥 **Interactive CVI (Conversational Video Interface)**: Connects users to a live face-to-face WebRTC video avatar room powered by **Tavus AI**, pre-seeded with the patient's specific neurocardiology report context.
+| Feature | Description |
+|---|---|
+| 🎥 **Avatar Explainer** | Generates a rendered AI video (MP4) of Dr. Anya reading a custom-scripted explanation of the report |
+| 💬 **Interactive Q&A (CVI)** | Launches a live WebRTC video room via Tavus CVI — patients or doctors can talk directly to the AI avatar |
+| 📄 **PDF Upload & RAG** | Upload a real clinical PDF report; the backend extracts text for the script and optionally ingests it into the Tavus Knowledge Base for RAG-powered Q&A |
+| 🔁 **Preview / Mock Mode** | Runs fully without API keys — useful for UI development and testing |
+| 🖥️ **Live Log Terminal** | Real-time backend log stream displayed in the browser via Server-Sent Events |
 
 ---
 
 ## 🎯 Target Audience Engine
 
-Our dual-mode engine ensures the right tone, metrics, and actionable advice are delivered to the right audience.
-
 | Feature | 👨‍⚕️ Doctor / Clinician Mode | 🧑‍🤝‍🧑 Patient / Family Mode |
-| :--- | :--- | :--- |
+|:---|:---|:---|
 | **Tone** | Rigorous, precise, peer-to-peer clinical language | Warm, empathetic, reassuring, zero jargon |
 | **Metrics Focus** | Tilt HR delta, BRS slope, RMSSD, QSART, LF/HF ratios | Simple bullet points, clear normal vs elevated flags |
-| **Pathophysiology** | Sympathetic surge, cardiovagal withdrawal, baroreflex failure | Smart thermostat analogy (brain-heart thermostat) |
-| **Action Plan** | Pharmacotherapy (Propranolol, Ivabradine), Levine Protocol | Hydration (2.5-3L), salt intake, compression socks |
+| **Pathophysiology** | Sympathetic surge, cardiovagal withdrawal, baroreflex failure | Brain-heart thermostat analogy |
+| **Action Plan** | Pharmacotherapy (Propranolol, Ivabradine), Levine Protocol | Hydration, salt intake, compression socks |
 
 ---
 
 ## 📁 Project Architecture
 
-A full-stack application leveraging a React frontend (Vite) and an Express/Python backend.
+This project uses a **Vite + React frontend** and an **Express (Node.js) backend** that runs concurrently in development. A separate Python/Django integration layer also exists in `backend/` — see [`backend/README.md`](backend/README.md) for details.
 
 ```text
-TAVUS integration/
-├── 📄 .env                           # Environment variables
-├── 📄 package.json                   # Node dependencies & scripts
-├── 📂 src/                           # Vite entry points (main.jsx, index.css)
-├── 📂 backend/                       # Python & Express Backend
-│   ├── explainer_prompts.py          # Clinical prompts, report parser & sample presets
-│   ├── explainer_routes.py           # REST endpoints for report analysis & CVI room creation
-│   ├── interview_routes.py           # Additional routes for Interview modes
-│   ├── tavus_client.py               # Tavus V2 API wrapper (persona & conversation management)
-│   └── test_*.py                     # CLI test suites
-└── 📂 frontend/                      # React Frontend Components
-    ├── NeuroCardioExplainer.jsx      # Main dashboard UI (Audience selector, Mode toggle)
-    ├── CVIExplainerRoom.jsx          # React WebRTC video room component for Tavus CVI
-    └── InterviewRoom.jsx             # React WebRTC room for interviews
+TAVUS integration/           ← Root (scaffolding only)
+├── .env                     ← Runtime secrets (gitignored)
+├── .gitignore
+├── README.md
+├── package.json             ← npm scripts & Node.js dependencies
+├── package-lock.json
+│
+├── backend/                 ← ALL backend code
+│   ├── server.js            ← ★ Express API server — all routes
+│   ├── smoke-test.mjs       ← Integration test suite
+│   ├── tmp_uploads/         ← Temp file store for Tavus doc ingestion (gitignored)
+│   ├── README.md            ← Python/Django layer documentation
+│   ├── explainer_prompts.py ← Clinical prompts, report parser & sample presets
+│   ├── explainer_routes.py  ← Django REST Framework views
+│   ├── tavus_client.py      ← Python Tavus V2 API wrapper
+│   ├── test_explainer.py    ← CLI test: prompts & Tavus API
+│   └── test_tavus.py        ← CLI test: live Tavus API connectivity
+│
+└── frontend/                ← ALL frontend code
+    ├── index.html           ← Vite HTML shell
+    ├── vite.config.js       ← Vite dev server config
+    ├── postcss.config.js    ← PostCSS config (Tailwind + Autoprefixer)
+    ├── tailwind.config.js   ← Tailwind CSS config
+    ├── src/                 ← Vite entry point
+    │   ├── main.jsx         ← React app mount
+    │   └── index.css        ← Tailwind CSS directives
+    └── NeuroCardioExplainer.jsx  ← ★ Main React UI component
 ```
 
 ---
 
 ## 🚀 Getting Started
 
-Follow these steps to set up the project locally.
+### Prerequisites
+- **Node.js** v18 or higher
+- **npm** v9 or higher
 
-### 1. Prerequisites
-- Node.js (v18+ recommended)
-- Python (3.9+ recommended)
-
-### 2. Installation
-
-Clone the repository and install dependencies:
+### 1. Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Environment Variables
+### 2. Configure Environment Variables
 
-Create a `.env` file in the root directory based on the following template:
+Create a `.env` file in the project root:
 
 ```env
 # Tavus AI Configuration
-TAVUS_API_KEY=your_tavus_api_key
-TAVUS_BASE_URL=https://tavusapi.com/v2
-TAVUS_REPLICA_ID=your_replica_id   # (Optional specific visual replica)
+TAVUS_API_KEY=your_tavus_api_key_here
+TAVUS_REPLICA_ID=your_replica_id_here
+
+# Optional
+TAVUS_TEST_MODE=false
+API_PORT=3001
+PUBLIC_SERVER_URL=https://your-public-domain.com   # Required for Tavus KB doc ingestion in prod
 ```
 
-> **Note**: If `TAVUS_API_KEY` is not supplied, the system automatically runs in interactive preview / mock mode for UI testing.
+> **Note:** If `TAVUS_API_KEY` is not set, the system automatically runs in **preview / mock mode** — all UI flows work, but no real Tavus calls are made.
 
-### 4. Running the Development Server
+### 3. Start the Development Server
 
-Start both the frontend (Vite) and backend (Express/Python) simultaneously:
+Starts both the frontend (Vite, port 3000) and backend (Express, port 3001) concurrently:
 
 ```bash
 npm run dev
 ```
 
-You can also run them separately if needed:
-- Frontend: `npm run dev:frontend`
-- Backend: `npm run dev:backend`
+Individual servers:
+```bash
+npm run dev:frontend   # Vite only (port 3000)
+npm run dev:backend    # Express only (port 3001)
+```
 
 ---
 
-## 🔌 API Reference (`backend/explainer_routes.py`)
+## 🔌 API Reference — Express Backend (`server.js`)
 
-- `GET /api/explainer/sample-reports/`
-  Retrieves pre-loaded test cases (e.g., POTS, Vasovagal Syncope, Cardioembolic Stroke Risk).
-- `POST /api/explainer/analyze/`
-  Accepts uploaded report file (`.pdf`, `.txt`) or raw text and target audience (`doctor` or `patient`), returning a structured static analysis.
-- `POST /api/explainer/start-cvi/`
-  Creates a Tavus AI NeuroCardiology Persona tuned to the uploaded report and returns a WebRTC video room iframe URL.
-- `POST /api/explainer/end-cvi/<conversation_id>/`
-  Concludes a live video session and fetches the transcript Q&A log.
+All routes are served from port **3001** and proxied through Vite on port **3000** in dev.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/logs` | **SSE stream** — real-time backend log feed for the browser terminal |
+| `POST` | `/api/explainer/generate-video` | Generate an AI avatar video (MP4) for a report. Accepts `report_file`, `report_text`, `sample_key`, `target_audience`. Returns `video_id` + `status`. |
+| `GET` | `/api/explainer/video-status/:videoId` | Poll render status. Returns `status`, `hosted_url`, `download_url`, `progress`. |
+| `POST` | `/api/explainer/start-cvi` | Create a Tavus Persona + Conversation (CVI) for live interactive Q&A. Returns `conversation_url`. |
+| `POST` | `/api/explainer/end-cvi/:id` | End a live CVI session gracefully. |
+| `POST` | `/api/explainer/upload-document` | Upload a PDF/doc to the Tavus Knowledge Base for RAG. Returns `document_id`. |
+| `GET` | `/api/explainer/document-status/:docId` | Poll document ingestion progress. |
+| `GET` | `/api/uploads/:fileId` | Serve a temporarily stored file (used by Tavus cloud to fetch uploaded docs). |
+
+### Request Fields — `generate-video` & `start-cvi`
+
+| Field | Type | Description |
+|---|---|---|
+| `target_audience` | `string` | `"patient"` or `"doctor"` |
+| `sample_key` | `string` | Optional preset key: `"pots_dysautonomia"` or `"vasovagal_syncope"` |
+| `report_text` | `string` | Raw report text (alternative to file upload) |
+| `report_file` | `File` | PDF or TXT report file upload |
+| `document_ids` | `JSON string` | Optional Tavus KB document IDs for RAG in CVI sessions |
 
 ---
 
 ## ⚡ Testing
 
-Run the Python test suite from the terminal to verify prompts, parsing, and the Tavus API integration:
+### Integration Smoke Test (Node.js)
+
+Requires the Express backend to be running (`npm run dev:backend`):
 
 ```bash
-python backend/test_explainer.py
-python backend/test_tavus.py
+node backend/smoke-test.mjs
 ```
+
+Tests all 8 API endpoints and prints a pass/fail summary.
+
+### Python Backend Tests
+
+See [`backend/README.md`](backend/README.md) for details.
+
+---
+
+## 🏗️ How It Works
+
+### Avatar Explainer Flow
+1. User selects a preset or uploads a PDF report
+2. Frontend posts to `POST /api/explainer/generate-video`
+3. Backend extracts text, builds a personalized script (`buildScript()`), and submits to Tavus `POST /v2/videos`
+4. Frontend polls `GET /api/explainer/video-status/:id` every 5 seconds
+5. When status is `"ready"`, the `<video>` or `<iframe>` player renders the result
+
+### Interactive CVI Flow
+1. User clicks "Start Live Chat"
+2. Frontend posts to `POST /api/explainer/start-cvi`
+3. Backend creates a Tavus Persona (with the report as the system prompt) + a Conversation room
+4. Frontend receives `conversation_url` and connects via Daily.co WebRTC (`@daily-co/daily-js`)
+5. User speaks directly to the AI avatar in real time
+6. On exit, `POST /api/explainer/end-cvi/:id` closes the session
+
+---
+
+## 📝 Environment Variable Reference
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `TAVUS_API_KEY` | No* | `` | Tavus API key. Without it, system runs in mock mode. |
+| `TAVUS_REPLICA_ID` | No* | `` | Tavus replica/avatar ID to use. |
+| `TAVUS_TEST_MODE` | No | `false` | Set to `true` to use Tavus test mode (free, no credits deducted) |
+| `API_PORT` | No | `3001` | Port for the Express backend server |
+| `PUBLIC_SERVER_URL` | No | `http://localhost:3001` | Public URL for Tavus cloud to fetch uploaded documents |
+
+*Without `TAVUS_API_KEY` and `TAVUS_REPLICA_ID`, the system operates in preview/mock mode.
