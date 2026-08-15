@@ -1,17 +1,30 @@
 /**
- * NeuroCardiology AI Explainer — Backend Server
+ * Dual-Path AI Avatar Video Pipeline — Backend Server
  *
- * Two distinct modes:
+ * ┌─────────────┐    PDF     ┌─────────────┐
+ * │ PDF Upload  │──────────▶│ PDF Parser  │
+ * └─────────────┘           └──────┬──────┘
+ *                                  │
+ *              ┌───────────────────┴───────────────────┐
+ *              │ Branch A: Non-Interactive             │ Branch B: Interactive CVI
+ *              ▼                                       ▼
+ *   ┌──────────────────────┐             ┌──────────────────────────┐
+ *   │ Gemini 2.5 Flash API │             │  Tavus Knowledge Base    │
+ *   │ (250-300 word script)│             │  (full document context) │
+ *   └──────────┬───────────┘             └────────────┬─────────────┘
+ *              ▼                                       ▼
+ *   ┌──────────────────────┐             ┌──────────────────────────┐
+ *   │ Tavus POST /v2/videos│             │ Tavus CVI Conversation   │
+ *   │ (2-min avatar video) │             │ (live Q&A with avatar)   │
+ *   └──────────────────────┘             └──────────────────────────┘
  *
- * 1. AVATAR EXPLAINER  (/api/explainer/generate-video)
- *    → Calls Tavus POST /v2/videos with the report-derived script.
- *    → Returns a video_id + status. Frontend polls /api/explainer/video-status/:id
- *      until status === "ready", then plays the returned video_url in a <video> tag.
- *
- * 2. INTERACTIVE Q&A  (/api/explainer/start-cvi)
- *    → Creates a Tavus Persona + Conversation (CVI) so the user can talk to the avatar.
- *    → Supports Tavus Knowledge Base: uploaded PDFs are ingested via POST /v2/documents
- *      and attached to conversations via document_ids for RAG-powered Q&A.
+ * Routes:
+ *   POST /api/explainer/generate-video      — Branch A: Gemini → Tavus video
+ *   GET  /api/explainer/video-status/:id    — Poll video render status
+ *   POST /api/explainer/start-cvi           — Branch B: Direct → Tavus CVI
+ *   POST /api/explainer/end-cvi/:id         — End CVI session
+ *   POST /api/explainer/upload-document     — Upload PDF to Tavus Knowledge Base
+ *   GET  /api/explainer/document-status/:id — Poll document processing status
  */
 
 import express from 'express';
@@ -59,10 +72,13 @@ setInterval(() => {
 app.use(express.json());
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const TAVUS_API_KEY    = process.env.TAVUS_API_KEY   || '';
+const TAVUS_API_KEY    = process.env.TAVUS_API_KEY    || '';
 const TAVUS_REPLICA_ID = process.env.TAVUS_REPLICA_ID || '';
 const TAVUS_BASE_URL   = 'https://tavusapi.com/v2';
 const TAVUS_TEST_MODE  = (process.env.TAVUS_TEST_MODE || '').toLowerCase() === 'true';
+const GEMINI_API_KEY   = process.env.GEMINI_API_KEY   || '';
+const GEMINI_MODEL     = process.env.GEMINI_MODEL     || 'gemini-flash-latest';
+const GEMINI_BASE_URL  = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 // ─── SSE Log broadcaster ─────────────────────────────────────────────────────
 // All connected frontend terminals receive structured log lines in real time.
@@ -106,9 +122,11 @@ app.get('/api/uploads/:fileId', (req, res) => {
   fs.createReadStream(entry.filePath).pipe(res);
 });
 
-console.log(`[SERVER] TAVUS_API_KEY : ${TAVUS_API_KEY ? 'OK (' + TAVUS_API_KEY.slice(0,8) + '...)' : 'MISSING'}`);
+console.log(`[SERVER] TAVUS_API_KEY : ${TAVUS_API_KEY  ? 'OK (' + TAVUS_API_KEY.slice(0,8)  + '...)' : 'MISSING'}`);
 console.log(`[SERVER] TAVUS_REPLICA : ${TAVUS_REPLICA_ID || 'MISSING'}`);
 console.log(`[SERVER] TEST_MODE     : ${TAVUS_TEST_MODE}`);
+console.log(`[SERVER] GEMINI_API_KEY: ${GEMINI_API_KEY ? 'OK (' + GEMINI_API_KEY.slice(0,8) + '...)' : 'MISSING — will use fallback script builder'}`);
+console.log(`[SERVER] GEMINI_MODEL  : ${GEMINI_MODEL}`);
 
 // ─── Tavus helper ─────────────────────────────────────────────────────────────
 async function tavus(method, apiPath, body = null) {
@@ -162,14 +180,15 @@ IMPRESSION: Neurocardiogenic (Vasovagal) Syncope — Mixed Cardioinhibitory & Va
   },
 };
 
-// ─── Script builder ───────────────────────────────────────────────────────────
+// ─── Fallback Script Builder (used when GEMINI_API_KEY is absent) ─────────────
+// Branch A: Non-Interactive Video — static template fallback
 function buildScript(reportText, isDoctor) {
   // Extract IMPRESSION line if present
   const impressionMatch = reportText.match(/IMPRESSION:\s*(.+)/is);
   const impression = impressionMatch ? impressionMatch[1].split('\n')[0].trim() : '';
 
   if (isDoctor) {
-    return `Hello Doctor. I have reviewed the submitted neurocardiology and autonomic evaluation report in full detail.
+    return `Hello Doctor. I have reviewed the submitted report in full detail.
 
 ${impression ? `The overall clinical impression reads: "${impression}".` : ''}
 
@@ -177,26 +196,109 @@ Let me walk you through the key findings now.
 
 ${reportText.slice(0, 800)}
 
-From a pathophysiological standpoint, the autonomic nervous system is demonstrating significant dysregulation. The findings indicate impaired baroreflex sensitivity and elevated sympathetic predominance, which together compromise the patient's hemodynamic stability upon orthostatic challenge.
-
-My clinical recommendations are as follows. First, consider low-dose pharmacotherapy such as beta blockers or Ivabradine to reduce the abnormal heart rate response. Second, prescribe non-pharmacological interventions including high sodium intake, adequate fluid loading, and graduated compression garments. Third, initiate supervised recumbent exercise rehabilitation.
-
-I recommend scheduling an autonomic panel re-assessment in twelve weeks to track treatment response. Please do not hesitate to consult further on any of these parameters.`;
+From a pathophysiological standpoint, the findings indicate significant dysregulation requiring prompt clinical attention. My clinical recommendations are: first, consider appropriate pharmacotherapy; second, prescribe evidence-based non-pharmacological interventions; and third, schedule a follow-up assessment in eight to twelve weeks to track treatment response. Please do not hesitate to consult further on any of these parameters.`;
   } else {
-    return `Hello. I am Doctor Ava, your AI Neurocardiology Specialist, and I have carefully reviewed your health report.
+    return `Hello. I am Doctor Ava, your AI specialist, and I have carefully reviewed your health report.
 
 ${impression ? `The report's main finding is: "${impression}".` : ''}
 
-Let me explain what all of this means for you in simple terms.
-
-Think of your body's nervous system like a smart thermostat that controls your heart rate automatically. When you stand up, this thermostat should slowly increase your heart rate just a little, to make sure blood keeps reaching your brain. But in your case, this thermostat is overreacting and sending a very strong signal that makes your heart beat much faster than needed. That is what causes the dizziness and palpitations you have been feeling.
-
-The good news is that your heart itself is perfectly healthy and strong. This is a signal regulation issue, not a structural problem.
-
-Here is what you can do to feel better. Make sure you drink around two to three litres of water every day. Adding a little extra salt to your meals will also help your body hold on to more fluid, which supports your blood pressure. Wearing compression stockings will stop blood from pooling in your legs when you stand up. And when you do stand up, do it slowly and take a moment before you start walking.
-
-Your doctor may also consider a gentle medication to stabilise your heart rate. You have very good options ahead of you. I recommend following up with your care team in the next few weeks to check on your progress. Thank you for trusting me with your care.`;
+Let me explain what this means for you in simple terms. Your body's automatic regulation system is showing some signs that we need to address together. The good news is that there are clear steps we can take to help you feel better. Your care team will guide you through the recommended plan. I recommend following up with your doctor in the coming weeks to check on your progress. Thank you for trusting me with your care.`;
   }
+}
+
+// ─── Branch A: Gemini Flash Script Generator ─────────────────────────────────
+// Calls Gemini API to produce a ~250-300 word spoken-word summary script.
+// Falls back to buildScript() if GEMINI_API_KEY is not configured or fails.
+async function generateScriptWithGemini(reportText, isDoctor) {
+  if (!GEMINI_API_KEY) {
+    console.warn('[GEMINI] No API key — using fallback script builder.');
+    return { script: buildScript(reportText, isDoctor), source: 'fallback' };
+  }
+
+  const audienceContext = isDoctor
+    ? 'You are speaking directly to the treating PHYSICIAN. Use precise clinical terminology, reference specific values and metrics, and speak as a peer specialist.'
+    : 'You are speaking directly to the PATIENT or their family. Use warm, simple language with helpful analogies. Avoid all medical jargon. Be reassuring and empathetic.';
+
+  const systemInstruction = `You are an AI medical narrator generating a spoken-word script for an AI avatar video. ${audienceContext}
+
+Your task: Given the clinical document below, generate a concise 2-minute spoken-word summary script (strictly 250 to 300 words).
+
+CRITICAL FORMAT RULES — violating any of these will break the video rendering:
+- NO bullet points, dashes, or list markers of any kind
+- NO headers, section titles, or markdown
+- NO parentheses, brackets, or special characters
+- Write in natural, flowing, conversational sentences only
+- Begin with a warm greeting appropriate for the audience
+- End with a clear closing statement or call to action
+- Speak entirely in first person as the AI doctor avatar`;
+
+  const userMessage = `Here is the clinical document to summarize:\n\n${reportText.slice(0, 6000)}`;
+
+  const modelsToTry = Array.from(new Set([GEMINI_MODEL, 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash']));
+
+  for (const model of modelsToTry) {
+    const url = `${GEMINI_BASE_URL}/${model}:generateContent?key=${GEMINI_API_KEY}`;
+    const requestBody = {
+      system_instruction: { parts: [{ text: systemInstruction }] },
+      contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 65536,
+      },
+    };
+
+    try {
+      console.log(`[GEMINI] Calling Gemini API model ${model} to generate spoken-word script...`);
+      const res  = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+
+      const text = await res.text();
+      let data   = {};
+      try { data = JSON.parse(text); } catch { data = { raw: text }; }
+
+      if (!res.ok) {
+        const errMsg = data.error?.message || `Gemini HTTP ${res.status}`;
+        console.warn(`[GEMINI] Model ${model} returned error: ${errMsg}`);
+        continue; // try next candidate model
+      }
+
+      const candidate = data.candidates?.[0];
+      let script      = candidate?.content?.parts?.[0]?.text?.trim();
+      if (!script) {
+        console.warn(`[GEMINI] Model ${model} returned no text.`);
+        continue;
+      }
+
+      // ── Sentence-completion guard ──────────────────────────────────────────
+      // If the model hit MAX_TOKENS, the script may be truncated mid-sentence.
+      // Trim to the last complete sentence to prevent the avatar from stopping
+      // mid-word during video playback.
+      if (candidate?.finishReason === 'MAX_TOKENS') {
+        const lastSentenceEnd = Math.max(
+          script.lastIndexOf('.'),
+          script.lastIndexOf('!'),
+          script.lastIndexOf('?')
+        );
+        if (lastSentenceEnd > script.length * 0.5) {
+          const trimmed = script.slice(0, lastSentenceEnd + 1).trim();
+          console.warn(`[GEMINI] MAX_TOKENS hit — trimmed from ${script.split(/\s+/).length} to ${trimmed.split(/\s+/).length} words at last complete sentence.`);
+          script = trimmed;
+        }
+      }
+
+      const wordCount = script.split(/\s+/).length;
+      console.log(`[GEMINI] SUCCESS! Script generated with model ${model}: ${wordCount} words (finishReason: ${candidate?.finishReason})`);
+      return { script, source: 'gemini', modelUsed: model, wordCount };
+    } catch (err) {
+      console.warn(`[GEMINI] Network error calling ${model}:`, err.message);
+    }
+  }
+
+  console.warn('[GEMINI] All Gemini models failed — falling back to static script builder.');
+  return { script: buildScript(reportText, isDoctor), source: 'fallback' };
 }
 
 // ─── Tavus Knowledge Base: Upload Document ───────────────────────────────────
@@ -312,24 +414,25 @@ app.get('/api/explainer/document-status/:docId', async (req, res) => {
   }
 });
 
-// ─── 1. POST /api/explainer/generate-video  (Avatar Explainer — renders MP4) ──
+// ─── 1. POST /api/explainer/generate-video  (Branch A — Non-Interactive Video) ─
+// Pipeline: PDF → PDF Parser → Gemini 2.5 Flash (250-300 word script) → Tavus Video
 app.post('/api/explainer/generate-video', upload.single('report_file'), async (req, res) => {
   let audience = (req.body.target_audience || 'patient').trim().toLowerCase();
   if (!['doctor', 'patient'].includes(audience)) audience = 'patient';
 
+  // ── Step 1: Document Ingestion & Text Extraction ───────────────────────────
   let reportText = (req.body.report_text || '').trim();
   if (req.file) {
     const ext = path.extname(req.file.originalname).toLowerCase();
     if (ext === '.pdf') {
-      // Use pdf-parse to extract text from PDF
       try {
-        console.log('[VIDEO] Extracting text from PDF:', req.file.originalname);
+        console.log('[BRANCH-A] Step 1 — Extracting text from PDF:', req.file.originalname);
         const parser = new PDFParse({ data: req.file.buffer });
         const pdfData = await parser.getText();
         reportText = pdfData.text || '';
-        console.log(`[VIDEO] Extracted ${reportText.length} chars from PDF`);
+        console.log(`[BRANCH-A] Step 1 — Extracted ${reportText.length} chars from PDF`);
       } catch (pdfErr) {
-        console.error('[VIDEO] PDF parse error:', pdfErr.message);
+        console.error('[BRANCH-A] PDF parse error:', pdfErr.message);
         return res.status(400).json({ error: 'Failed to extract text from PDF: ' + pdfErr.message });
       }
     } else {
@@ -345,42 +448,59 @@ app.post('/api/explainer/generate-video', upload.single('report_file'), async (r
   }
 
   const isDoctor = audience === 'doctor';
-  const script   = buildScript(reportText, isDoctor);
 
-  // ── No API key → return a hosted demo video so the UI still works ───────
+  // ── Step 2: Gemini 2.5 Flash — Generate spoken-word script ─────────────────
+  // This is the core of Branch A: the parsed text is routed to Gemini 2.5 Flash
+  // which produces a concise ~250-300 word spoken-word summary script.
+  // The LLM is NOT involved in Branch B (CVI) — that path bypasses this step.
+  console.log(`[BRANCH-A] Step 2 — Routing to Gemini 2.5 Flash (audience: ${audience})`);
+  const { script, source: scriptSource, wordCount, error: geminiError } = await generateScriptWithGemini(reportText, isDoctor);
+  console.log(`[BRANCH-A] Step 2 — Script ready. Source: ${scriptSource}, Words: ${wordCount || 'N/A'}${geminiError ? ', Gemini error: ' + geminiError : ''}`);
+
+  // ── No Tavus API key → return a hosted demo video so the UI still works ────
   if (!TAVUS_API_KEY || !TAVUS_REPLICA_ID) {
     return res.json({
-      video_id: 'demo',
-      status:   'ready',
-      video_url: 'https://www.w3schools.com/html/mov_bbb.mp4',
-      is_mock:  true,
+      video_id:       'demo',
+      status:         'ready',
+      video_url:      'https://www.w3schools.com/html/mov_bbb.mp4',
+      is_mock:        true,
+      script_source:  scriptSource,
+      extracted_text: reportText,
+      generated_script: script,
     });
   }
 
+  // ── Step 3: Submit script to Tavus for non-interactive avatar video render ──
   try {
-    console.log('[VIDEO] Submitting to Tavus POST /v2/videos ...');
+    console.log('[BRANCH-A] Step 3 — Submitting script to Tavus POST /v2/videos ...');
     const data = await tavus('POST', '/videos', {
       replica_id: TAVUS_REPLICA_ID,
       script,
-      video_name: `neurocardio-${audience}-${Date.now()}`,
+      video_name: `dual-path-${audience}-${Date.now()}`,
     });
 
-    console.log(`[VIDEO] video_id=${data.video_id}  status=${data.status}`);
+    console.log(`[BRANCH-A] Step 3 — video_id=${data.video_id}  status=${data.status}`);
     res.json({
-      video_id:  data.video_id,
-      status:    data.status,      // usually "queued" or "generating"
-      video_url: data.video_url || null,
-      is_mock:   false,
+      video_id:         data.video_id,
+      status:           data.status,
+      video_url:        data.video_url || null,
+      is_mock:          false,
+      script_source:    scriptSource,
+      extracted_text:   reportText,
+      generated_script: script,
     });
   } catch (err) {
-    console.error('[VIDEO] Error:', err.message);
+    console.error('[BRANCH-A] Tavus error:', err.message);
     if (err.message.includes('Payment required') || err.message.includes('credit') || err.message.includes('402')) {
-      console.warn('[VIDEO] Tavus API video credit limit reached — falling back to demo video mode');
+      console.warn('[BRANCH-A] Tavus credit limit reached — falling back to demo video mode');
       return res.json({
-        video_id: 'demo',
-        status:   'ready',
-        hosted_url: 'https://www.w3schools.com/html/mov_bbb.mp4',
-        is_mock:  true,
+        video_id:         'demo',
+        status:           'ready',
+        hosted_url:       'https://www.w3schools.com/html/mov_bbb.mp4',
+        is_mock:          true,
+        script_source:    scriptSource,
+        extracted_text:   reportText,
+        generated_script: script,
       });
     }
     res.status(502).json({ error: err.message });
@@ -427,7 +547,11 @@ app.get('/api/explainer/video-status/:videoId', async (req, res) => {
   }
 });
 
-// ─── 3. POST /api/explainer/start-cvi  (Interactive Q&A — live conversation) ──
+// ─── 3. POST /api/explainer/start-cvi  (Branch B — Interactive CVI) ────────────
+// Pipeline: PDF → PDF Parser → Tavus Knowledge Base → CVI
+// NOTE: This branch intentionally BYPASSES the Gemini LLM layer.
+// The parsed document is injected directly into the Tavus Knowledge Base,
+// empowering the avatar to handle live questions about the full document.
 app.post('/api/explainer/start-cvi', upload.single('report_file'), async (req, res) => {
   let audience = (req.body.target_audience || 'patient').trim().toLowerCase();
   if (!['doctor', 'patient'].includes(audience)) audience = 'patient';
@@ -436,7 +560,7 @@ app.post('/api/explainer/start-cvi', upload.single('report_file'), async (req, r
   if (req.file) {
     const ext = path.extname(req.file.originalname).toLowerCase();
     if (ext === '.pdf') {
-      // Use pdf-parse to extract text from PDF for system prompt / context
+      // Branch B: Extract text for CVI system prompt context (NO Gemini call)
       try {
         console.log('[CVI] Extracting text from PDF:', req.file.originalname);
         const parser = new PDFParse({ data: req.file.buffer });
@@ -564,11 +688,17 @@ app.post('/api/explainer/end-cvi/:id', async (req, res) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 const PORT = process.env.API_PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`\n[SERVER] Running on http://localhost:${PORT}`);
-  console.log(`  POST /api/explainer/generate-video      — Avatar Explainer (renders MP4)`);
+  console.log(`\n╔════════════════════════════════════════════════════════════╗`);
+  console.log(`║     Dual-Path AI Avatar Video Pipeline — Backend Ready     ║`);
+  console.log(`╚════════════════════════════════════════════════════════════╝`);
+  console.log(`  http://localhost:${PORT}\n`);
+  console.log(`  ── Branch A: Non-Interactive Video ──────────────────────────`);
+  console.log(`  POST /api/explainer/generate-video      — PDF→Gemini→Tavus video`);
   console.log(`  GET  /api/explainer/video-status/:id    — Poll render status`);
-  console.log(`  POST /api/explainer/start-cvi           — Interactive Q&A (live CVI)`);
+  console.log(`\n  ── Branch B: Interactive CVI ─────────────────────────────`);
+  console.log(`  POST /api/explainer/start-cvi           — PDF→Tavus KB→CVI`);
   console.log(`  POST /api/explainer/end-cvi/:id         — End CVI session`);
-  console.log(`  POST /api/explainer/upload-document     — Upload PDF/doc to Tavus Knowledge Base`);
+  console.log(`\n  ── Shared ────────────────────────────────────────────────`);
+  console.log(`  POST /api/explainer/upload-document     — Upload to Tavus Knowledge Base`);
   console.log(`  GET  /api/explainer/document-status/:id — Poll document processing status\n`);
 });
