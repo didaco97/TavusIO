@@ -43,28 +43,22 @@ The **NeuroCardiology AI Explainer** takes complex diagnostic reports — autono
 
 ## 📁 Project Architecture
 
-This project uses a **Vite + React frontend** and an **Express (Node.js) backend** that runs concurrently in development. A separate Python/Django integration layer also exists in `backend/` — see [`backend/README.md`](backend/README.md) for details.
+This project uses a **Vite + React frontend** and an **Express (Node.js) backend** that runs concurrently in development.
 
 ```text
-TAVUS integration/           ← Root (scaffolding only)
+TAVUS integration/           ← Root
 ├── .env                     ← Runtime secrets (gitignored)
 ├── .gitignore
 ├── README.md
+├── API_INTEGRATION_DOCS.md  ← API Documentation for the Report Module team
 ├── package.json             ← npm scripts & Node.js dependencies
 ├── package-lock.json
 │
-├── backend/                 ← ALL backend code
+├── backend/                 ← Backend code
 │   ├── server.js            ← ★ Express API server — all routes
-│   ├── smoke-test.mjs       ← Integration test suite
-│   ├── tmp_uploads/         ← Temp file store for Tavus doc ingestion (gitignored)
-│   ├── README.md            ← Python/Django layer documentation
-│   ├── explainer_prompts.py ← Clinical prompts, report parser & sample presets
-│   ├── explainer_routes.py  ← Django REST Framework views
-│   ├── tavus_client.py      ← Python Tavus V2 API wrapper
-│   ├── test_explainer.py    ← CLI test: prompts & Tavus API
-│   └── test_tavus.py        ← CLI test: live Tavus API connectivity
+│   └── tmp_uploads/         ← Temp file store for Tavus doc ingestion (gitignored)
 │
-└── frontend/                ← ALL frontend code
+└── frontend/                ← Frontend code
     ├── index.html           ← Vite HTML shell
     ├── vite.config.js       ← Vite dev server config
     ├── postcss.config.js    ← PostCSS config (Tailwind + Autoprefixer)
@@ -72,7 +66,7 @@ TAVUS integration/           ← Root (scaffolding only)
     ├── src/                 ← Vite entry point
     │   ├── main.jsx         ← React app mount
     │   └── index.css        ← Tailwind CSS directives
-    └── NeuroCardioExplainer.jsx  ← ★ Main React UI component
+    └── NeuroCardioExplainer.jsx  ← ★ Main split-screen React UI component
 ```
 
 ---
@@ -97,9 +91,13 @@ Create a `.env` file in the project root:
 # Tavus AI Configuration
 TAVUS_API_KEY=your_tavus_api_key_here
 TAVUS_REPLICA_ID=your_replica_id_here
+TAVUS_TEST_MODE=false
+
+# Gemini AI Configuration (for Branch A scripts)
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-flash-latest
 
 # Optional
-TAVUS_TEST_MODE=false
 API_PORT=3001
 PUBLIC_SERVER_URL=https://your-public-domain.com   # Required for Tavus KB doc ingestion in prod
 ```
@@ -161,10 +159,6 @@ node backend/smoke-test.mjs
 
 Tests all 8 API endpoints and prints a pass/fail summary.
 
-### Python Backend Tests
-
-See [`backend/README.md`](backend/README.md) for details.
-
 ---
 
 ## 🏗️ How It Works
@@ -192,6 +186,8 @@ See [`backend/README.md`](backend/README.md) for details.
 |---|---|---|---|
 | `TAVUS_API_KEY` | No* | `` | Tavus API key. Without it, system runs in mock mode. |
 | `TAVUS_REPLICA_ID` | No* | `` | Tavus replica/avatar ID to use. |
+| `GEMINI_API_KEY` | No* | `` | Google Gemini API key for generating Branch A scripts. |
+| `GEMINI_MODEL` | No | `gemini-flash-latest` | The Gemini LLM to use. |
 | `TAVUS_TEST_MODE` | No | `false` | Set to `true` to use Tavus test mode (free, no credits deducted) |
 | `API_PORT` | No | `3001` | Port for the Express backend server |
 | `PUBLIC_SERVER_URL` | No | `http://localhost:3001` | Public URL for Tavus cloud to fetch uploaded documents |
