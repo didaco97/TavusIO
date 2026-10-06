@@ -2,6 +2,183 @@
 @tailwind components;
 @tailwind utilities;
 
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-deep:    #03080f;
+  --bg-card:    #070e17;
+  --bg-surface: #0a1421;
+  --accent:     #e8303a;
+  --accent-dim: #e8303a33;
+  --accent-glow:#e8303a66;
+  --teal:       #0ea5e9;
+  --teal-dim:   #0ea5e922;
+  --border:     rgba(255,255,255,0.08);
+  --border-mid: rgba(255,255,255,0.12);
+  --text-pri:   #f0f4f8;
+  --text-sec:   rgba(240,244,248,0.55);
+  --text-dim:   rgba(240,244,248,0.25);
+}
+
+html, body, #root { height: 100%; }
 body {
-  font-family: 'Plus Jakarta Sans', sans-serif;
+  background: var(--bg-deep);
+  color: var(--text-pri);
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* ─── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+/* ─── Animations ── */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.92); opacity: 0.8; }
+  50%  { transform: scale(1.08); opacity: 0.3; }
+  100% { transform: scale(0.92); opacity: 0.8; }
+}
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%       { transform: scale(1.12); }
+  28%       { transform: scale(1); }
+  42%       { transform: scale(1.06); }
+  70%       { transform: scale(1); }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+@keyframes ecg-move {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px var(--accent-glow), 0 0 60px var(--accent-dim); }
+  50%       { box-shadow: 0 0 40px var(--accent-glow), 0 0 100px var(--accent-dim); }
+}
+
+.animate-slide-up  { animation: slide-up  0.45s cubic-bezier(.22,1,.36,1) both; }
+.animate-fade-in   { animation: fade-in   0.3s ease both; }
+.animate-heartbeat { animation: heartbeat 1.4s ease-in-out infinite; }
+.animate-glow      { animation: glow-pulse 2.5s ease-in-out infinite; }
+
+.shimmer-line {
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%);
+  background-size: 400px 100%;
+  animation: shimmer 1.6s infinite linear;
+}
+
+/* ─── ECG Background Line ── */
+.ecg-bg {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  opacity: 0.04;
+}
+
+/* ─── Glassmorphism Card ── */
+.glass-card {
+  background: rgba(10, 20, 33, 0.7);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* ─── Button variants ── */
+.btn-primary {
+  background: linear-gradient(135deg, #e8303a 0%, #c0222b 100%);
+  border: 1px solid rgba(232,48,58,0.4);
+  color: white;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 20px rgba(232,48,58,0.3);
+}
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 32px rgba(232,48,58,0.45);
+}
+.btn-primary:active:not(:disabled) { transform: translateY(0); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-ghost {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text-sec);
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.08); border-color: var(--border-mid); color: var(--text-pri); }
+
+/* ─── Upload Drop Zone ── */
+.drop-zone {
+  border: 2px dashed rgba(255,255,255,0.1);
+  transition: all 0.25s ease;
+}
+.drop-zone.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.drop-zone:hover {
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.02);
+}
+
+/* ─── System Prompt Textarea ── */
+.sys-textarea {
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border);
+  color: var(--text-pri);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+.sys-textarea:focus {
+  outline: none;
+  border-color: rgba(232,48,58,0.4);
+}
+.sys-textarea::placeholder { color: var(--text-dim); }
+
+/* ─── Progress Bar ── */
+.progress-bar {
+  height: 3px;
+  background: linear-gradient(90deg, #e8303a, #ff6b6b);
+  border-radius: 99px;
+  transition: width 0.4s ease;
+}
+
+/* ─── CVI Window overlay ── */
+.cvi-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(3,8,15,0.95);
+  backdrop-filter: blur(24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── Terminal Log ── */
+.terminal-log {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  line-height: 1.6;
 }
